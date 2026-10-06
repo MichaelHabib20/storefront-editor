@@ -154,6 +154,14 @@ test('a failed build is reported with its output', async () => {
   await git(['checkout', '--', 'build.mjs'], workspace);
 });
 
+test('reports the store budget', async () => {
+  const budget = (await call('GET', '/stores/acme/budget')).body;
+  assert.equal(budget.spentUsd, 0);
+  assert.equal(budget.blocked, false);
+  assert.ok(budget.allowedModels.includes(budget.editModel));
+  assert.equal((await call('GET', '/stores/missing/budget')).status, 404);
+});
+
 test('removes the workspace but keeps the branch', async () => {
   assert.equal((await call('DELETE', '/stores/acme')).status, 204);
   assert.deepEqual((await call('GET', '/stores')).body.stores, []);

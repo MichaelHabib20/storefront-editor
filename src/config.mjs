@@ -31,6 +31,8 @@ export function loadConfig(env = process.env) {
     serve: JSON.parse(env.EDITOR_SERVE ?? 'null') ?? ['npx', ['next', 'start', '-p', '{port}']],
     /** Ports previews are served on. */
     previewPorts: [Number(env.EDITOR_PREVIEW_PORT_FROM ?? 3301), Number(env.EDITOR_PREVIEW_PORT_TO ?? 3399)],
+    /** Models and spending limits (static for now, agent design §6). */
+    aiConfigFile: env.EDITOR_AI_CONFIG ?? path.join(root, 'config', 'ai.json'),
     /** The editor's own HTTP API. */
     port: Number(env.EDITOR_PORT ?? 4300),
   };

@@ -1,0 +1,16 @@
+{
+  "defaults": {
+    "editModel": "claude-sonnet-5-5",
+    "triageModel": "claude-haiku-4-5-20251001",
+    "allowedModels": ["claude-sonnet-5-5", "claude-opus-5-5"],
+    "routing": "fixed",
+    "effort": "medium",
+    "monthlyLimitUsd": 20,
+    "perRequestMaxUsd": 2,
+    "minToStartUsd": 0.1,
+    "warnAt": 0.8,
+    "maxTurns": 40,
+    "maxFixRounds": 3
+  },
+  "stores": {}
+}
