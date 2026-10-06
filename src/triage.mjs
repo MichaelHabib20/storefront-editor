@@ -105,6 +105,8 @@ category tiles on the home page"), even if a site-wide change could also do it.
 - "unclear": 2-4 concrete choices that answer your question (e.g. "Product cards", "Product page", "Both").
 - "edit" with "confirm": true: "Yes, go ahead" plus 1-2 alternatives when there is an obvious one.
 - otherwise: [].
+Language: write "reply" and "options" in the language of the owner's LATEST message (English if it is English, Arabic if
+it is Arabic), even if earlier messages were in another language.
 "reply": for "edit", one short sentence saying what you understood. For the others, the answer to show the owner, short
 and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.`;
 
