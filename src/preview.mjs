@@ -1,0 +1,123 @@
+/**
+ * Previews (design §3): a store copy is built and served on its own port with the store's API settings, so
+ * the merchant sees the change before it is published. One preview per store; starting again rebuilds.
+ */
+import { spawn } from 'node:child_process';
+import net from 'node:net';
+import { run } from './run.mjs';
+
+export class PreviewError extends Error {
+  constructor(code, message, output = '') {
+    super(message);
+    this.code = code;
+    this.output = output;
+  }
+}
+
+function portFree(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => server.close(() => resolve(true)));
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+function waitForHttp(url, timeoutMs, isAlive) {
+  const until = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const attempt = async () => {
+      if (!isAlive()) return resolve(false);
+      try {
+        await fetch(url, { signal: AbortSignal.timeout(2000) });
+        return resolve(true);
+      } catch {
+        if (Date.now() > until) return resolve(false);
+        setTimeout(attempt, 300);
+      }
+    };
+    attempt();
+  });
+}
+
+function killTree(child) {
+  if (child.exitCode !== null) return;
+  if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
+  else child.kill();
+}
+
+export function createPreviews(config, stores, env = process.env) {
+  /** id -> { port, child, startedAt, commit } */
+  const running = new Map();
+
+  function storeEnv(store) {
+    const key = store.apiKeyEnv ? env[store.apiKeyEnv] : undefined;
+    return { SC_API_URL: store.apiUrl, ...(key ? { SC_API_KEY: key } : {}) };
+  }
+
+  async function freePort() {
+    const used = new Set([...running.values()].map((p) => p.port));
+    const [from, to] = config.previewPorts;
+    for (let port = from; port <= to; port++) if (!used.has(port) && (await portFree(port))) return port;
+    throw new PreviewError('no_port', 'No free preview port.');
+  }
+
+  async function stop(id) {
+    const preview = running.get(id);
+    if (!preview) return false;
+    running.delete(id);
+    killTree(preview.child);
+    return true;
+  }
+
+  return {
+    list() {
+      return [...running.entries()].map(([id, p]) => ({ id, port: p.port, url: `http://localhost:${p.port}`, startedAt: p.startedAt, commit: p.commit }));
+    },
+
+    stop,
+
+    async stopAll() {
+      for (const id of [...running.keys()]) await stop(id);
+    },
+
+    /** Builds and serves the store's copy as it is now; resolves once the preview answers. */
+    async start(id) {
+      const store = await stores.get(id);
+      const cwd = stores.workspaceOf(id);
+      const envFor = storeEnv(store);
+      await stop(id);
+
+      const [buildCommand, buildArgs] = config.build;
+      const built = await run(buildCommand, buildArgs, { cwd, env: envFor });
+      if (built.code !== 0) throw new PreviewError('build_failed', 'The preview build failed.', built.output.slice(-20_000));
+
+      const port = await freePort();
+      const [serveCommand, serveArgs] = config.serve;
+      const child = spawn(serveCommand, serveArgs.map((a) => a.replaceAll('{port}', String(port))), {
+        cwd,
+        env: { ...process.env, ...envFor, PORT: String(port) },
+        shell: process.platform === 'win32',
+        windowsHide: true,
+      });
+      let output = '';
+      const keep = (chunk) => {
+        output = (output + chunk.toString()).slice(-20_000);
+      };
+      child.stdout.on('data', keep);
+      child.stderr.on('data', keep);
+      child.on('close', () => {
+        if (running.get(id)?.child === child) running.delete(id);
+      });
+
+      const commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
+      running.set(id, { port, child, startedAt: new Date().toISOString(), commit });
+      const up = await waitForHttp(`http://127.0.0.1:${port}/`, 60_000, () => child.exitCode === null);
+      if (!up) {
+        await stop(id);
+        throw new PreviewError('serve_failed', 'The preview did not start.', output);
+      }
+      return { id, port, url: `http://localhost:${port}`, commit };
+    },
+  };
+}

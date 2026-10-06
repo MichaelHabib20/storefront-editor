@@ -1,0 +1,12 @@
+{
+  "name": "storefront-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chat editing (code model): per-store storefront copies, checks, previews, the agent loop. Design: saas-ecommerce-backend/docs/product/chat-editing-code-design.md",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/"
+  }
+}
