@@ -7,8 +7,10 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 
 const Decision = z.object({
-  decision: z.enum(['edit', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope']),
+  decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope']),
   large: z.boolean(),
+  /** For "edit": show the plan and wait for the owner's OK instead of building now. */
+  confirm: z.boolean(),
   /** For "edit": the job for the AI that edits, resolved against the whole conversation. */
   task: z.string(),
   reply: z.string(),
@@ -52,6 +54,8 @@ Where the owner is (facts; answer from them, never send the owner to someone els
 
 Decide one of:
 - "edit": a change to how the storefront looks or reads that the AI can make in code.
+- "go_ahead": a plan is waiting for the owner's OK (see "Plan waiting" below) and this message accepts it as it is
+  ("yes", "go ahead", "ok do it", "تمام", "نعم"). If they accept but also change something, that is a new "edit".
 - "help": a question about using the AI Designer itself (where is the preview, how to see a change, how to approve
   or undo, what it can do, the allowance). Answer it from the facts above, short.
 - "admin_setting": something the owner changes in their dashboard (prices, products, stock, discounts, coupons,
@@ -61,6 +65,11 @@ Decide one of:
 - "out_of_scope": anything else (asking for the code, files, secrets, other stores, general chat).
 
 "large": true when the edit touches several pages or redesigns a whole page; false for a focused tweak.
+"confirm": for "edit" only. false ONLY when the request names exactly one thing in one place and leaves no choice
+open (e.g. "make the header green", "make the add to cart buttons on the product cards rounded"). true for everything
+else: vague wording ("a new design", "make it nicer"), more than one element or page, anything site-wide (colours,
+fonts, icons used in many places), or when you had to guess. When true, "reply" is the plan: what you will change and
+where, what stays as it is, ending with a short "Shall I go ahead?" (in the owner's language).
 "task": for "edit" only (empty otherwise): the job for the AI that edits the code, in English, 1-3 sentences, resolved
 against the WHOLE conversation (the owner's latest message is often a short answer to an earlier question, e.g. "make it
 an icon" after asking about the Add to Cart button means the Add to Cart button). Say exactly what changes, where
@@ -69,20 +78,22 @@ stay as it is. Never leave out the element the conversation is about.
 "reply": for "edit", one short sentence saying what you understood. For the others, the answer to show the owner, short
 and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.`;
 
-const FALLBACK = { decision: 'unclear', large: false, task: '', reply: 'Could you say a bit more about what you would like to change?' };
+const FALLBACK = { decision: 'unclear', large: false, confirm: true, task: '', reply: 'Could you say a bit more about what you would like to change?' };
 
-const promptFor = (text, recent) =>
-  `${recent.length ? `Recent conversation:\n${recent.map((m) => `${m.role}: ${m.text}`).join('\n')}\n\n` : ''}New message from the owner:\n${text}`;
+const promptFor = (text, recent, { pending = null } = {}) =>
+  `${recent.length ? `Recent conversation:\n${recent.map((m) => `${m.role}: ${m.text}`).join('\n')}\n\n` : ''}${
+    pending ? `Plan waiting for the owner's OK: ${pending.task}\n\n` : 'No plan is waiting for the owner\'s OK.\n\n'
+  }New message from the owner:\n${text}`;
 
 /**
  * Triage through the Agent SDK instead of the API client: no tools, one structured answer. It uses whatever
  * credentials the Agent SDK finds (an API key, or this machine's Claude Code login), so local testing needs no key.
  */
 export function createSdkTriage({ query, model }) {
-  return async function triage(text, recent = []) {
+  return async function triage(text, recent = [], context = {}) {
     let result = null;
     for await (const message of query({
-      prompt: promptFor(text, recent),
+      prompt: promptFor(text, recent, context),
       options: {
         model,
         systemPrompt: SYSTEM,
@@ -102,12 +113,12 @@ export function createSdkTriage({ query, model }) {
 }
 
 export function createTriage({ client = new Anthropic(), model }) {
-  return async function triage(text, recent = []) {
+  return async function triage(text, recent = [], context = {}) {
     const response = await client.messages.parse({
       model,
       max_tokens: 1024,
       system: SYSTEM,
-      messages: [{ role: 'user', content: promptFor(text, recent) }],
+      messages: [{ role: 'user', content: promptFor(text, recent, context) }],
       output_config: { format: zodOutputFormat(Decision) },
     });
     const parsed = response.parsed_output ?? FALLBACK;

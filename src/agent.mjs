@@ -120,6 +120,13 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     };
   }
 
+  /** The plan waiting for the owner's OK (or null). */
+  function setPending(storeId, plan) {
+    chats.update(storeId, (chat) => {
+      chat.pending = plan ? { ...plan, at: new Date().toISOString() } : null;
+    });
+  }
+
   function setRun(storeId, fields) {
     chats.update(storeId, (chat) => {
       chat.run = { ...(chat.run ?? {}), ...fields, updatedAt: new Date().toISOString() };
@@ -140,23 +147,40 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     let outcome = 'failed';
 
     try {
-      const decision = await triage(text, chats.recent(storeId));
+      const pending = chats.get(storeId).pending ?? null;
+      const decision = await triage(text, chats.recent(storeId), { pending });
       charge({ kind: 'triage', model: decision.model, costUsd: decision.costUsd, usage: decision.usage });
-      if (decision.decision !== 'edit') {
+
+      // what gets built: a clear request now, or the plan the owner just accepted
+      let job = null;
+      if (decision.decision === 'go_ahead' && pending) {
+        job = { task: pending.task, large: pending.large };
+        chats.say(storeId, 'assistant', decision.reply || 'On it.', { runId, kind: 'understood' });
+      } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
+        // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
+        setPending(storeId, { task: decision.task, large: decision.large });
+        chats.say(storeId, 'assistant', decision.reply, { runId, kind: 'plan' });
+        outcome = 'plan';
+        return;
+      } else if (decision.decision === 'edit') {
+        job = { task: decision.task, large: decision.large };
+        chats.say(storeId, 'assistant', decision.reply, { runId, kind: 'understood' });
+      } else {
         // a question about the AI Designer gets the store's preview link when one is running
         const preview = decision.decision === 'help' ? previews.list().find((p) => p.id === storeId) : null;
-        chats.say(storeId, 'assistant', decision.reply, { runId, ...(preview ? { preview: preview.url } : {}) });
-        outcome = decision.decision;
+        const reply = decision.decision === 'go_ahead' ? 'There is no change waiting to be made. What would you like to change?' : decision.reply;
+        chats.say(storeId, 'assistant', reply, { runId, ...(preview ? { preview: preview.url } : {}) });
+        outcome = decision.decision === 'go_ahead' ? 'unclear' : decision.decision;
         return;
       }
-      chats.say(storeId, 'assistant', decision.reply, { runId, kind: 'understood' });
+      setPending(storeId, null);
 
-      const model = aiConfig.editModel(storeId, { large: decision.large });
+      const model = aiConfig.editModel(storeId, { large: job.large });
       await ensureDraft(storeId, cwd);
       setRun(storeId, { state: 'editing', model });
 
       // the editing AI gets the job triage resolved plus the conversation, not just the owner's last few words
-      const prompt = taskPrompt({ task: decision.task, latest: text, recent: chats.recent(storeId, 12) });
+      const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, 12) });
       let turn = await agentTurn(storeId, { prompt, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd });
       charge(turn.charge, true);
 
@@ -183,7 +207,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           try {
             const preview = await previews.start(storeId);
             await git(['add', '-A'], cwd);
-            await git([...AUTHOR, 'commit', '-q', '-m', `AI Designer: ${text.slice(0, 72)}`, '-m', `run ${runId}`], cwd);
+            await git([...AUTHOR, 'commit', '-q', '-m', `AI Designer: ${(job.task || text).slice(0, 72)}`, '-m', `owner: ${text.slice(0, 200)}\nrun ${runId}`], cwd);
             const commit = (await git(['rev-parse', 'HEAD'], cwd)).trim();
             chats.update(storeId, (chat) => {
               chat.draft = { branch: draftOf(storeId), commit, updatedAt: new Date().toISOString() };
@@ -223,7 +247,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       let refunded = 0;
       try {
         status = ledger.settle(reservation, charges);
-        refunded = outcome !== 'preview' && outcome !== 'no_change' && refundable.length ? refundable.reduce((a, b) => a + b, 0) : 0;
+        refunded = !['preview', 'no_change'].includes(outcome) && refundable.length ? refundable.reduce((a, b) => a + b, 0) : 0;
         if (refunded > 0) status = ledger.refund(storeId, runId, refunded, outcome);
       } catch (error) {
         log('settle failed', storeId, runId, error);

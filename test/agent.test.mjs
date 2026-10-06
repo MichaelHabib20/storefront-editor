@@ -168,6 +168,31 @@ test('the editing AI gets the resolved task and the whole conversation, not just
   assert.match(prompt, /latest message: make it icon/);
 });
 
+test('a vague request gets a plan; "yes" builds exactly that plan; a new request replaces it', async () => {
+  triageAnswer = { decision: 'edit', large: false, confirm: true, task: 'Make the product card titles bold.', reply: 'I will make the product titles bold. Shall I go ahead?' };
+  const planned = await runToEnd('make the cards nicer');
+  assert.equal(planned.run.outcome, 'plan');
+  assert.equal(planned.messages.at(-1).text, 'I will make the product titles bold. Shall I go ahead?');
+  assert.equal(agentCalls.length, 0, 'nothing is built before the OK');
+
+  // another request instead of an OK: the new one is planned, the old plan is gone
+  triageAnswer = { decision: 'edit', large: false, confirm: true, task: 'Make the product card prices blue.', reply: 'I will make prices blue. Go ahead?' };
+  await runToEnd('actually the prices, blue');
+  triageAnswer = { decision: 'go_ahead', large: false, confirm: false, task: '', reply: 'On it.' };
+  agentScript = [(cwd) => write(cwd, 'src/prices.txt', 'blue')];
+  const built = await runToEnd('yes go ahead');
+  assert.equal(built.run.outcome, 'preview');
+  assert.equal(agentCalls.length, 1);
+  assert.match(agentCalls[0].prompt, /Make the product card prices blue\./);
+  assert.doesNotMatch(agentCalls[0].prompt.split('The conversation so far')[0], /bold/);
+
+  // "yes" with no plan waiting builds nothing
+  agentCalls.length = 0;
+  const nothing = await runToEnd('yes');
+  assert.equal(nothing.run.outcome, 'unclear');
+  assert.equal(agentCalls.length, 0);
+});
+
 test('a question about the AI Designer is answered with the running preview link', async () => {
   triageAnswer = { decision: 'help', large: false, reply: 'Your preview is on the right of this page.' };
   const chat = await runToEnd('where can I see my changes?');
@@ -176,11 +201,18 @@ test('a question about the AI Designer is answered with the running preview link
   assert.match(chat.messages.at(-1).preview, /^http:\/\/localhost:347\d$/);
 });
 
-test('a large request uses the strongest allowed model; the session continues', async () => {
-  triageAnswer = { decision: 'edit', large: true, reply: 'A new home page.' };
+test('a large request is planned first, then built with the strongest allowed model; the session continues', async () => {
+  // a large request always waits for the owner's OK, even if triage did not ask for it
+  triageAnswer = { decision: 'edit', large: true, confirm: false, task: 'Redesign the home page.', reply: 'I will redesign the home page. Shall I go ahead?' };
+  const planned = await runToEnd('redesign the home page');
+  assert.equal(planned.run.outcome, 'plan');
+  assert.equal(agentCalls.length, 0);
+
+  triageAnswer = { decision: 'go_ahead', large: false, confirm: false, task: '', reply: 'On it.' };
   agentScript = [(cwd) => write(cwd, 'src/home.txt', 'new home')];
-  const chat = await runToEnd('redesign the home page');
+  const chat = await runToEnd('yes');
   assert.equal(chat.run.outcome, 'preview');
+  assert.match(agentCalls[0].prompt, /Redesign the home page\./);
   assert.equal(agentCalls[0].options.model, 'claude-opus-5-5');
   assert.equal(agentCalls[0].options.resume, 'session-1');
   // the session total grew from 0.1 to 0.2: only the new 0.1 is charged
