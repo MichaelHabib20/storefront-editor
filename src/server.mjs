@@ -28,7 +28,8 @@ import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
 import { createStores, StoreError } from './stores.mjs';
-import { createTriage } from './triage.mjs';
+import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
+import { createSdkTriage, createTriage } from './triage.mjs';
 
 const STATUS = {
   busy: 409,
@@ -78,7 +79,8 @@ export function createApp(config = loadConfig(), deps = {}) {
   const triage = deps.triage ?? ((text, recent) => {
     // the triage model is the same for every store today; created on first use so tests and the HTTP API need no key
     const model = aiConfig.forStore('').triageModel;
-    if (!triageFor.has(model)) triageFor.set(model, createTriage({ model }));
+    // with no API key (local testing), triage goes through the Agent SDK and this machine's Claude Code login
+    if (!triageFor.has(model)) triageFor.set(model, process.env.ANTHROPIC_API_KEY ? createTriage({ model }) : createSdkTriage({ query: deps.query ?? sdkQuery, model }));
     return triageFor.get(model)(text, recent);
   });
   const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log: deps.log ?? ((...a) => console.log(...a)) });
