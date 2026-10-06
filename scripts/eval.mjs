@@ -27,7 +27,7 @@ const value = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : nu
 
 const STORE = 'eval';
 const JUDGE_MODEL = 'claude-sonnet-5-5';
-const USAGE_LIMIT = /usage limit|rate limit|rate_limit|429|overloaded|quota/i;
+const USAGE_LIMIT = /usage limit|weekly limit|hit your [a-z ]*limit|limit · resets|rate limit|rate_limit|\b429\b|overloaded|quota/i;
 
 const outDir = value('--resume') ? path.resolve(value('--resume')) : path.join(root, 'evals', 'out', new Date().toISOString().replace(/[:.]/g, '-'));
 fs.mkdirSync(outDir, { recursive: true });
@@ -165,7 +165,8 @@ for (const testCase of todo) {
   }
   const chat = app.chats.get(STORE);
   const caseLogs = logs.slice(logStart).join('\n');
-  if (USAGE_LIMIT.test(caseLogs)) {
+  const limitHit = (text) => USAGE_LIMIT.test(text ?? '');
+  if (limitHit(caseLogs) || chat.messages.some((m) => limitHit(m.text))) {
     say(`${testCase.id}: the model usage limit was hit — stopping; go on later with --resume ${outDir}`);
     fs.writeFileSync(path.join(caseDir, 'log.txt'), caseLogs);
     stoppedForLimits = true;
@@ -176,6 +177,11 @@ for (const testCase of todo) {
   if (testCase.expect.see && outcomes.at(-1) === 'preview' && !flag('--no-judge')) {
     seen.judge = await judge(testCase, caseDir).catch((error) => ({ pass: false, reason: `judge error: ${error.message}`, costUsd: 0 }));
     judgeCost = seen.judge.costUsd ?? 0;
+    if (limitHit(seen.judge.reason)) {
+      say(`${testCase.id}: the judge hit the model usage limit — stopping; go on later with --resume ${outDir}`);
+      stoppedForLimits = true;
+      break;
+    }
   }
   const score = scoreCase(testCase, seen);
   const costUsd = Math.max(0, app.ledger.status(STORE).spentUsd - spentBefore) + judgeCost;
