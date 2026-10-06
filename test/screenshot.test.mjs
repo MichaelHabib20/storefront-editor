@@ -25,6 +25,18 @@ after(async () => {
   await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
 });
 
+test('the browser is never closed while a shot is still running, only after a quiet spell', async () => {
+  let closed = 0;
+  const fake = { isConnected: () => true, close: async () => void (closed += 1) };
+  const quick = createBrowserPool({ launch: async () => fake, idleMs: 50 });
+  await quick.get();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(closed, 0, 'a long shot keeps the browser');
+  quick.release();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(closed, 1, 'closed once nothing used it for a while');
+});
+
 test('only paths on the preview are allowed', () => {
   assert.equal(safePreviewPath('/en/p/shoe?size=2'), '/en/p/shoe?size=2');
   assert.equal(safePreviewPath(undefined), '/');

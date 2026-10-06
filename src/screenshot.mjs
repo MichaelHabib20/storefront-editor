@@ -21,17 +21,34 @@ export function safePreviewPath(value) {
   return p;
 }
 
-/** One headless browser, opened on the first shot and closed after a quiet minute. */
+/**
+ * One headless browser, opened on the first shot and closed after a quiet minute — counted from the end of the last
+ * shot, never while one is still running (a page compiling after an edit can take more than a minute).
+ */
 export function createBrowserPool({ launch = async () => (await import('playwright')).chromium.launch(), idleMs = 60_000 } = {}) {
   let browser = null;
   let timer = null;
+  let active = 0;
   return {
+    /** Takes the browser for one shot; call release() when the shot is done. */
     async get() {
       clearTimeout(timer);
-      if (!browser || !browser.isConnected()) browser = await launch();
-      timer = setTimeout(() => this.close(), idleMs);
-      timer.unref?.();
-      return browser;
+      active += 1;
+      try {
+        if (!browser || !browser.isConnected()) browser = await launch();
+        return browser;
+      } catch (error) {
+        active -= 1;
+        throw error;
+      }
+    },
+    release() {
+      active = Math.max(0, active - 1);
+      if (active === 0) {
+        clearTimeout(timer);
+        timer = setTimeout(() => this.close(), idleMs);
+        timer.unref?.();
+      }
     },
     async close() {
       clearTimeout(timer);
@@ -48,18 +65,29 @@ export function createBrowserPool({ launch = async () => (await import('playwrig
  */
 export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport = 'desktop', fullPage = false, saveDir, index }) {
   const browser = await pool.get();
-  const context = await browser.newContext({ viewport: { width: VIEWPORTS[viewport].width, height: VIEWPORTS[viewport].height }, isMobile: VIEWPORTS[viewport].isMobile, deviceScaleFactor: VIEWPORTS[viewport].deviceScaleFactor });
   try {
-    const page = await context.newPage();
-    await page.goto(new URL(pagePath, baseUrl).toString(), { waitUntil: 'load', timeout: 120_000 });
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    const image = await page.screenshot({ type: 'jpeg', quality: 70, fullPage });
+    const shoot = async () => {
+      const context = await browser.newContext({ viewport: { width: VIEWPORTS[viewport].width, height: VIEWPORTS[viewport].height }, isMobile: VIEWPORTS[viewport].isMobile, deviceScaleFactor: VIEWPORTS[viewport].deviceScaleFactor });
+      try {
+        const page = await context.newPage();
+        await page.goto(new URL(pagePath, baseUrl).toString(), { waitUntil: 'load', timeout: 150_000 });
+        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+        return await page.screenshot({ type: 'jpeg', quality: 70, fullPage });
+      } finally {
+        await context.close().catch(() => {});
+      }
+    };
+    // a dev preview may be reloading right after an edit: one more try
+    const image = await shoot().catch(async () => {
+      await new Promise((r) => setTimeout(r, 3000));
+      return shoot();
+    });
     await fs.mkdir(saveDir, { recursive: true });
     const file = `${String(index).padStart(2, '0')}-${viewport}-${pagePath.replace(/[^a-z0-9]+/gi, '_').slice(0, 40) || 'home'}.jpg`;
     await fs.writeFile(path.join(saveDir, file), image);
     return { data: image.toString('base64'), file };
   } finally {
-    await context.close().catch(() => {});
+    pool.release();
   }
 }
 
@@ -72,6 +100,8 @@ export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, sh
   return createSdkMcpServer({
     name: 'editor',
     version: '1.0.0',
+    // a page compiling after an edit, plus one retry
+    timeout: 330_000,
     tools: [
       tool(
         'screenshot',
