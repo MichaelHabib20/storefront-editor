@@ -2,3 +2,5 @@ node_modules/
 workspaces/
 data/
 *.log
+evals/out/
+evals/data/
