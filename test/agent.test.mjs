@@ -193,6 +193,20 @@ test('a vague request gets a plan; "yes" builds exactly that plan; a new request
   assert.equal(agentCalls.length, 0);
 });
 
+test('questions and plans carry tap-able choices, cleaned', async () => {
+  triageAnswer = { decision: 'unclear', large: false, confirm: true, task: '', reply: 'Which Add to Cart buttons?', options: ['Product cards', ' Product page ', 'product cards', '', 'Both', 'All of them', 'Fifth one'] };
+  const asked = await runToEnd('make add to cart an icon');
+  assert.deepEqual(asked.messages.at(-1).options, ['Product cards', 'Product page', 'Both', 'All of them']);
+
+  triageAnswer = { decision: 'edit', large: false, confirm: true, task: 'Show a cart icon on the product card buttons.', reply: 'I will show a cart icon on the product card buttons. Go ahead?', options: ['Yes, go ahead', 'x'.repeat(80)] };
+  const planned = await runToEnd('Product cards');
+  assert.deepEqual(planned.messages.at(-1).options, ['Yes, go ahead', 'x'.repeat(60)]);
+
+  triageAnswer = { decision: 'help', large: false, confirm: false, task: '', reply: 'The preview is on the right.', options: ['ignored'] };
+  const help = await runToEnd('where is the preview?');
+  assert.equal(help.messages.at(-1).options, undefined, 'only questions and plans carry choices');
+});
+
 test('a question about the AI Designer is answered with the running preview link', async () => {
   triageAnswer = { decision: 'help', large: false, reply: 'Your preview is on the right of this page.' };
   const chat = await runToEnd('where can I see my changes?');

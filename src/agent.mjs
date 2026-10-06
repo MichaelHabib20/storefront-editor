@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { fixPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
+import { cleanOptions } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
 import { must, run } from './run.mjs';
 
@@ -159,7 +160,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
         // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
         setPending(storeId, { task: decision.task, large: decision.large });
-        chats.say(storeId, 'assistant', decision.reply, { runId, kind: 'plan' });
+        chats.say(storeId, 'assistant', decision.reply, { runId, kind: 'plan', options: cleanOptions(decision.options) });
         outcome = 'plan';
         return;
       } else if (decision.decision === 'edit') {
@@ -169,7 +170,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         // a question about the AI Designer gets the store's preview link when one is running
         const preview = decision.decision === 'help' ? previews.list().find((p) => p.id === storeId) : null;
         const reply = decision.decision === 'go_ahead' ? 'There is no change waiting to be made. What would you like to change?' : decision.reply;
-        chats.say(storeId, 'assistant', reply, { runId, ...(preview ? { preview: preview.url } : {}) });
+        const options = decision.decision === 'unclear' ? cleanOptions(decision.options) : [];
+        chats.say(storeId, 'assistant', reply, { runId, ...(preview ? { preview: preview.url } : {}), ...(options.length ? { options } : {}) });
         outcome = decision.decision === 'go_ahead' ? 'unclear' : decision.decision;
         return;
       }
