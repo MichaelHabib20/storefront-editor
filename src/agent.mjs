@@ -188,7 +188,11 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
             outcome = 'preview';
             return;
           } catch (error) {
-            if (!(error instanceof PreviewError) || error.code !== 'build_failed') throw error;
+            if (!(error instanceof PreviewError) || error.code !== 'build_failed') {
+              // not the agent's fault (the preview server, a port...): keep what it said for us, then give up
+              if (error instanceof PreviewError) setRun(storeId, { lastFailure: { round, step: `preview ${error.code}`, output: String(error.output ?? '').slice(-4000) } });
+              throw error;
+            }
             failure = { step: 'build', output: error.output };
           }
         }

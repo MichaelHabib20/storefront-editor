@@ -23,13 +23,17 @@ function portFree(port) {
   });
 }
 
+/**
+ * Resolves true once the server answers at all. Redirects are not followed: the answer to `/` is the locale
+ * redirect, which comes back at once, while rendering a page in dev mode takes seconds (compile + API calls).
+ */
 function waitForHttp(url, timeoutMs, isAlive) {
   const until = Date.now() + timeoutMs;
   return new Promise((resolve) => {
     const attempt = async () => {
       if (!isAlive()) return resolve(false);
       try {
-        await fetch(url, { signal: AbortSignal.timeout(2000) });
+        await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(5000) });
         return resolve(true);
       } catch {
         if (Date.now() > until) return resolve(false);
@@ -38,6 +42,15 @@ function waitForHttp(url, timeoutMs, isAlive) {
     };
     attempt();
   });
+}
+
+/** Opens the home page once so a dev server compiles it before the merchant looks; a slow or failed load is fine. */
+async function warm(url) {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  } catch {
+    // the preview is up; the merchant's own load will compile it
+  }
 }
 
 function killTree(child) {
@@ -92,8 +105,8 @@ export function createPreviews(config, stores, env = process.env) {
       const envFor = storeEnv(store);
       const current = running.get(id);
       if (!production && current?.mode === 'dev' && current.child.exitCode === null) {
-        // already serving this folder: ask for the home page so the edit is compiled before the merchant looks
-        await waitForHttp(`http://127.0.0.1:${current.port}/`, 180_000, () => current.child.exitCode === null);
+        // already serving this folder: open the home page so the edit is compiled before the merchant looks
+        await warm(`http://127.0.0.1:${current.port}/`);
         current.commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
         return { id, port: current.port, url: `http://localhost:${current.port}`, commit: current.commit };
       }
@@ -125,12 +138,12 @@ export function createPreviews(config, stores, env = process.env) {
 
       const commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
       running.set(id, { port, child, mode: production ? 'production' : 'dev', startedAt: new Date().toISOString(), commit });
-      // a dev server compiles the first page on request: allow it minutes, not seconds
-      const up = await waitForHttp(`http://127.0.0.1:${port}/`, production ? 60_000 : 180_000, () => child.exitCode === null);
+      const up = await waitForHttp(`http://127.0.0.1:${port}/`, 120_000, () => child.exitCode === null);
       if (!up) {
         await stop(id);
         throw new PreviewError('serve_failed', 'The preview did not start.', output);
       }
+      if (!production) await warm(`http://127.0.0.1:${port}/`);
       return { id, port, url: `http://localhost:${port}`, commit };
     },
   };
