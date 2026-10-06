@@ -16,6 +16,21 @@ export class StoreError extends Error {
   }
 }
 
+/** Removes the workspace's node_modules link itself, never what it points to. */
+export async function unlinkModules(workspace) {
+  const link = path.join(workspace, 'node_modules');
+  let stat;
+  try {
+    stat = await fs.lstat(link);
+  } catch {
+    return;
+  }
+  if (!stat.isSymbolicLink()) throw new StoreError('unsafe_remove', `${link} is not a link; refusing to remove the workspace.`);
+  // on Windows a junction is removed with rmdir (no recursion: the link only); elsewhere unlink
+  if (process.platform === 'win32') await fs.rmdir(link);
+  else await fs.unlink(link);
+}
+
 export function createStores(config) {
   const file = path.join(config.dataDir, 'stores.json');
   const branchOf = (id) => `store/${id}`;
@@ -132,7 +147,14 @@ export function createStores(config) {
     async remove(id) {
       const stores = await read();
       if (!stores[id]) throw new StoreError('not_found', `No store copy "${id}".`);
-      await run('git', ['worktree', 'remove', '--force', workspaceOf(id)], { cwd: config.starterRepo });
+      // unlink the shared node_modules FIRST: deleting the folder through the link would delete the starter's packages
+      await unlinkModules(workspaceOf(id));
+      const removed = await run('git', ['worktree', 'remove', '--force', workspaceOf(id)], { cwd: config.starterRepo });
+      if (removed.code !== 0) {
+        // e.g. build output git will not delete; safe now that the link is gone
+        await fs.rm(workspaceOf(id), { recursive: true, force: true, maxRetries: 3 });
+        await run('git', ['worktree', 'prune'], { cwd: config.starterRepo });
+      }
       delete stores[id];
       await write(stores);
     },

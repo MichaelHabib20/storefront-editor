@@ -12,6 +12,9 @@ const Decision = z.object({
   reply: z.string(),
 });
 
+// the engine rejects the draft 2020-12 `$schema` header zod adds
+const { $schema, ...SCHEMA } = z.toJSONSchema(Decision);
+
 /** $ per million tokens, for the triage model's own call (the agent's cost comes from the SDK). */
 const PRICES = {
   'claude-haiku-4-5': { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
@@ -70,7 +73,7 @@ export function createSdkTriage({ query, model }) {
         settingSources: [],
         strictMcpConfig: true,
         persistSession: false,
-        outputFormat: { type: 'json_schema', schema: z.toJSONSchema(Decision) },
+        outputFormat: { type: 'json_schema', schema: SCHEMA },
       },
     })) {
       if (message.type === 'result') result = message;

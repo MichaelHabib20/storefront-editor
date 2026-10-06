@@ -45,6 +45,9 @@ before(async () => {
   );
   await fs.writeFile(path.join(starter, '.gitignore'), 'built.txt\nnode_modules\n');
   await commitInStarter('page.txt', 'v1', 'starter v1');
+  // installed dependencies the store copies share through a link
+  await fs.mkdir(path.join(starter, 'node_modules', '.bin'), { recursive: true });
+  await fs.writeFile(path.join(starter, 'node_modules', '.bin', 'next.cmd'), 'keep me');
 
   process.env.EDITOR_TEST_KEY = 'secret-key';
   app = createApp({
@@ -162,8 +165,12 @@ test('reports the store budget', async () => {
   assert.equal((await call('GET', '/stores/missing/budget')).status, 404);
 });
 
-test('removes the workspace but keeps the branch', async () => {
+test('removes the workspace but keeps the branch and the starter dependencies', async () => {
+  const workspace = app.stores.workspaceOf('acme');
+  assert.equal(await fs.readFile(path.join(workspace, 'node_modules', '.bin', 'next.cmd'), 'utf8'), 'keep me', 'the copy sees the shared dependencies');
   assert.equal((await call('DELETE', '/stores/acme')).status, 204);
+  assert.equal(await fs.readFile(path.join(starter, 'node_modules', '.bin', 'next.cmd'), 'utf8'), 'keep me', 'removing a copy never deletes through the link');
+  await assert.rejects(fs.access(workspace));
   assert.deepEqual((await call('GET', '/stores')).body.stores, []);
   assert.equal((await git(['branch', '--list', 'store/acme'])).trim().replace('* ', '').replace('+ ', ''), 'store/acme');
 });

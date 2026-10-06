@@ -214,7 +214,7 @@ test('one message at a time; an empty budget refuses', async () => {
   agentScript = [() => new Promise((resolve) => (release = resolve))];
   const first = await call('POST', '/stores/acme/messages', { text: 'slow change' });
   assert.equal(first.status, 202);
-  await new Promise((r) => setTimeout(r, 100));
+  for (let i = 0; i < 200 && !release; i++) await new Promise((r) => setTimeout(r, 25));
   assert.equal((await call('POST', '/stores/acme/messages', { text: 'another' })).status, 409);
   assert.equal((await call('POST', '/stores/acme/draft/approve')).status, 409);
   release();
