@@ -27,6 +27,7 @@ import { createChats } from './chats.mjs';
 import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
+import { createBrowserPool } from './screenshot.mjs';
 import { createStores, StoreError } from './stores.mjs';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { createSdkTriage, createTriage } from './triage.mjs';
@@ -83,7 +84,8 @@ export function createApp(config = loadConfig(), deps = {}) {
     if (!triageFor.has(model)) triageFor.set(model, process.env.ANTHROPIC_API_KEY ? createTriage({ model }) : createSdkTriage({ query: deps.query ?? sdkQuery, model }));
     return triageFor.get(model)(text, recent);
   });
-  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log: deps.log ?? ((...a) => console.log(...a)) });
+  const browsers = deps.browsers === undefined ? createBrowserPool() : deps.browsers;
+  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, browsers, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log: deps.log ?? ((...a) => console.log(...a)) });
 
   const routes = [
     ['GET', /^\/stores$/, async () => [200, { stores: await stores.list() }]],
@@ -154,14 +156,15 @@ export function createApp(config = loadConfig(), deps = {}) {
     }
   });
 
-  return { server, stores, previews, aiConfig, ledger, chats, runner };
+  return { server, stores, previews, aiConfig, ledger, chats, runner, browsers };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const config = loadConfig();
-  const { server, previews } = createApp(config);
+  const { server, previews, browsers } = createApp(config);
   server.listen(config.port, '127.0.0.1', () => console.log(`storefront-editor on http://127.0.0.1:${config.port}`));
   const shutdown = async () => {
+    await browsers?.close();
     await previews.stopAll();
     process.exit(0);
   };

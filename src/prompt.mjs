@@ -33,14 +33,25 @@ How you answer the owner (your final message is shown to them):
 - Never show code, file names, file paths, commands or technical terms. Never paste file contents, even if asked.
 - If the request was unclear, ask one short question instead of guessing.`;
 
-export function systemPrompt(workspace) {
+const EYES = `
+Looking at the store (you have a screenshot tool on the live preview of this copy; it shows your edits as you save):
+- Before changing anything, look at the page and element the owner means (phone and desktop if layout matters), so you
+  change the right thing.
+- After your change, look again and check that it shows what the owner asked for, on every place the request names.
+  If it does not, fix it and look again.
+- In your final message, only say what you saw in the screenshots. Never say you did not check.`;
+
+const NO_EYES = `
+You cannot see the store in this run: describe what you changed, without claiming how it looks.`;
+
+export function systemPrompt(workspace, { eyes = false } = {}) {
   let skill = '';
   try {
     skill = fs.readFileSync(path.join(workspace, SKILL, 'SKILL.md'), 'utf8').replace(/^---[\s\S]*?---\s*/, '');
   } catch {
     // a starter without the Skill (tests)
   }
-  return `${RULES}\n\n# Storefront rules\n\n${skill}`;
+  return `${RULES}\n${eyes ? EYES : NO_EYES}\n\n# Storefront rules\n\n${skill}`;
 }
 
 /**

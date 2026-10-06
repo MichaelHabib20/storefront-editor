@@ -7,11 +7,13 @@
  * be made to pass leaves the draft exactly as it was and is refunded.
  */
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { fixPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
 import { cleanOptions } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
+import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
 import { must, run } from './run.mjs';
 
 const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
@@ -29,6 +31,8 @@ export class ChangeError extends Error {
 export function fileGuard(workspace, policy) {
   const deny = (reason) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
   return async (input) => {
+    // the editor's own tools (screenshots) take page paths, not files
+    if (String(input.tool_name ?? '').startsWith('mcp__editor__')) return {};
     const args = input.tool_input ?? {};
     const target = args.file_path ?? args.notebook_path ?? args.path;
     if (WRITE_TOOLS.has(input.tool_name)) {
@@ -57,7 +61,7 @@ export function askShared(ownerText) {
   };
 }
 
-export function createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, query = sdkQuery, files, log = () => {} }) {
+export function createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, query = sdkQuery, files, browsers = null, log = () => {} }) {
   const policy = createFilePolicy(files);
   const generated = files.generated ?? [];
   const git = (args, cwd) => must('git', args, { cwd });
@@ -101,7 +105,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
   }
 
   /** One Agent SDK call; returns the final message and what it cost beyond what the session had already spent. */
-  async function agentTurn(storeId, { prompt, model, settings, maxBudgetUsd, cwd }) {
+  async function agentTurn(storeId, { prompt, model, settings, maxBudgetUsd, cwd, eyes = null }) {
     const chat = chats.get(storeId);
     const stream = query({
       prompt,
@@ -112,12 +116,13 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         maxTurns: settings.maxTurns,
         maxBudgetUsd: Math.max(0.01, maxBudgetUsd),
         tools: TOOLS,
-        allowedTools: TOOLS,
+        allowedTools: eyes ? [...TOOLS, SCREENSHOT_TOOL] : TOOLS,
+        ...(eyes ? { mcpServers: { editor: eyes } } : {}),
         permissionMode: 'dontAsk',
         permissionPrompts: 'none',
         settingSources: [],
         strictMcpConfig: true,
-        systemPrompt: systemPrompt(cwd),
+        systemPrompt: systemPrompt(cwd, { eyes: !!eyes }),
         ...(chat.sessionId ? { resume: chat.sessionId } : {}),
         env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
         hooks: { PreToolUse: [{ hooks: [fileGuard(cwd, policy)] }] },
@@ -144,6 +149,27 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       costUsd,
       charge: { kind: 'edit', model, costUsd, usage: result.modelUsage ?? null },
     };
+  }
+
+  /**
+   * The screenshot tool for one run: only with a dev preview, which shows the copy as the agent edits it. The
+   * preview is started (or reused) first, so the agent can look before it changes anything.
+   */
+  async function eyesFor(storeId, runId) {
+    if (!browsers || config.previewMode !== 'dev') return null;
+    try {
+      setRun(storeId, { state: 'building_preview' });
+      const { port } = await previews.start(storeId);
+      return screenshotServer({
+        pool: browsers,
+        baseUrl: () => `http://127.0.0.1:${port}`,
+        saveDir: path.join(config.dataDir, 'runs', runId),
+        onShot: (file) => setRun(storeId, { screenshots: [...(chats.get(storeId).run?.screenshots ?? []), file] }),
+      });
+    } catch (error) {
+      log('no screenshots for this run', storeId, runId, error.message);
+      return null;
+    }
   }
 
   /** The plan waiting for the owner's OK (or null). */
@@ -204,11 +230,12 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
 
       const model = aiConfig.editModel(storeId, { large: job.large });
       await ensureDraft(storeId, cwd);
+      const eyes = await eyesFor(storeId, runId);
       setRun(storeId, { state: 'editing', model });
 
       // the editing AI gets the job triage resolved plus the conversation, not just the owner's last few words
       const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, 12), shared: job.shared });
-      let turn = await agentTurn(storeId, { prompt, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd });
+      let turn = await agentTurn(storeId, { prompt, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
       charge(turn.charge, true);
 
       for (let round = 0; ; round++) {
@@ -267,7 +294,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         setRun(storeId, { lastFailure: { round, step: failure.step, output: String(failure.output ?? '').slice(-4000) } });
         if (round >= settings.maxFixRounds) throw new ChangeError('checks_failed', `Still failing after ${round} fix rounds (${failure.step}).`);
         setRun(storeId, { state: 'fixing', round: round + 1 });
-        turn = await agentTurn(storeId, { prompt: fixPrompt(failure.step, failure.output), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd });
+        turn = await agentTurn(storeId, { prompt: fixPrompt(failure.step, failure.output), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
         charge({ ...turn.charge, kind: 'fix' }, true);
       }
     } catch (error) {
