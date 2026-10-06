@@ -5,10 +5,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 export function createChats(dataDir) {
   const dir = path.join(dataDir, 'chats');
   const fileOf = (storeId) => path.join(dir, `${storeId}.json`);
+  /** Told about every change (the event streams push it to the admin page). */
+  const changes = new EventEmitter();
+  changes.setMaxListeners(0);
 
   function read(storeId) {
     try {
@@ -27,10 +31,19 @@ export function createChats(dataDir) {
   return {
     get: read,
 
+    /** Calls `listener(chat)` after every change of this store's chat; returns the unsubscribe function. */
+    watch(storeId, listener) {
+      const handler = (id, chat) => id === storeId && listener(chat);
+      changes.on('change', handler);
+      return () => changes.off('change', handler);
+    },
+
     update(storeId, change) {
       const chat = read(storeId);
       change(chat);
-      return write(chat);
+      write(chat);
+      changes.emit('change', storeId, chat);
+      return chat;
     },
 
     say(storeId, role, text, extra = {}) {

@@ -10,6 +10,7 @@
  *   POST   /stores/:id/update-starter  merge the starter's latest main (reverted on conflict or failed check)
  *   GET    /stores/:id/budget          this month's limit, spend, what is left, warning / blocked
  *   GET    /stores/:id/chat            messages, the current run (polled while it works), the open draft, budget
+ *   GET    /stores/:id/events?ticket=  the same, pushed as server-sent events (browser; signed ticket, no key)
  *   POST   /stores/:id/messages        {text} -> 202 {runId}; 409 busy, 402 out of budget
  *   POST   /stores/:id/draft/approve   merge the draft into the store's copy
  *   POST   /stores/:id/draft/discard   drop the draft
@@ -27,7 +28,9 @@ import { createChats } from './chats.mjs';
 import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
+import { presentChat } from './present.mjs';
 import { createBrowserPool } from './screenshot.mjs';
+import { verifyTicket } from './tickets.mjs';
 import { createStores, StoreError } from './stores.mjs';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { createSdkTriage, createTriage } from './triage.mjs';
@@ -134,13 +137,58 @@ export function createApp(config = loadConfig(), deps = {}) {
     ['DELETE', /^\/stores\/([^/]+)\/preview$/, async (_req, id) => [200, { stopped: await previews.stop(id) }]],
   ];
 
+  /** What the admin page sees (the same shape as the backend's ChatPresenter). */
+  const view = (id, chat) => presentChat(chat, { preview: previews.list().find((p) => p.id === id) ?? null, budget: ledger.status(id) });
+
+  /**
+   * GET /stores/:id/events?ticket=...: the chat pushed as server-sent events ("chat" on every change, "expired" when
+   * the ticket runs out, a comment every 15 s to keep proxies from closing it). Opened by the browser, so it is
+   * authorised by the backend's signed ticket, not the service key.
+   */
+  async function stream(req, res, id) {
+    const deny = (status, payload) => {
+      res.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+      res.end(JSON.stringify(payload));
+    };
+    const ticket = verifyTicket(config.serviceKey, new URL(req.url, 'http://local').searchParams.get('ticket'), id);
+    if (!ticket.ok) return deny(401, { error: 'bad_ticket', message: ticket.reason });
+    try {
+      await stores.get(id);
+    } catch {
+      return deny(404, { error: 'not_found', message: 'No such store.' });
+    }
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'access-control-allow-origin': '*',
+      'x-accel-buffering': 'no',
+    });
+    res.write('retry: 3000\n\n');
+    const push = (chat) => res.write(`event: chat\ndata: ${JSON.stringify(view(id, chat))}\n\n`);
+    push(chats.get(id));
+    const unwatch = chats.watch(id, push);
+    const beat = setInterval(() => res.write(': keep-alive\n\n'), 15_000);
+    const expiry = setTimeout(() => {
+      res.write('event: expired\ndata: {}\n\n');
+      res.end();
+    }, Math.max(0, ticket.expiresAt * 1000 - Date.now()));
+    req.on('close', () => {
+      unwatch();
+      clearInterval(beat);
+      clearTimeout(expiry);
+    });
+  }
+
   const server = http.createServer(async (req, res) => {
     const send = (status, payload) => {
       res.writeHead(status, payload === null ? {} : { 'content-type': 'application/json' });
       res.end(payload === null ? undefined : JSON.stringify(payload));
     };
-    if (config.serviceKey && !keyMatches(req.headers['x-editor-key'], config.serviceKey)) return send(401, { error: 'unauthorized', message: 'Missing or wrong x-editor-key.' });
     const pathname = new URL(req.url, 'http://local').pathname;
+    const events = req.method === 'GET' && pathname.match(/^\/stores\/([^/]+)\/events$/);
+    if (events) return stream(req, res, decodeURIComponent(events[1]));
+    if (config.serviceKey && !keyMatches(req.headers['x-editor-key'], config.serviceKey)) return send(401, { error: 'unauthorized', message: 'Missing or wrong x-editor-key.' });
     try {
       for (const [method, pattern, handler] of routes) {
         const match = pathname.match(pattern);
