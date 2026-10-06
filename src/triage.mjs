@@ -97,9 +97,10 @@ an icon" after asking about the Add to Cart button means the Add to Cart button)
 (which page, which element, e.g. "the Add to Cart buttons on the product cards in listings and rails") and what must
 stay as it is. Never leave out the element the conversation is about.
 "shared": for "edit" only. true when the owner asks for something that is the same across the whole store: the main
-or brand colours, fonts, the header, the footer, the menu, an icon everywhere it appears. false when the request is about
-one element or one page (e.g. "the add to cart buttons on the product cards"), even if a site-wide change could also
-do it.
+or brand colours, fonts, an icon everywhere it appears, and ANY element of the page frame that shows on every page — the
+header and anything in it (logo, search box, header icons), the announcement bar, the menus, the footer and anything in
+it. false when the request is about elements inside pages (e.g. "the add to cart buttons on the product cards", "the
+category tiles on the home page"), even if a site-wide change could also do it.
 "options": short answers the owner can tap instead of typing, in their language, each under 40 characters:
 - "unclear": 2-4 concrete choices that answer your question (e.g. "Product cards", "Product page", "Both").
 - "edit" with "confirm": true: "Yes, go ahead" plus 1-2 alternatives when there is an obvious one.

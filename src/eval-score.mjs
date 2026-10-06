@@ -47,6 +47,10 @@ export function scoreCase(testCase, seen) {
     const hits = seen.changedFiles.filter((f) => forbidden.canEdit(f));
     if (hits.length) reasons.push(`changed files it must not touch: ${hits.join(', ')}`);
   }
+  if (expect.filesAny && final === 'preview') {
+    const wanted = matcher(expect.filesAny);
+    if (!seen.changedFiles.some((f) => wanted.canEdit(f))) reasons.push(`changed none of the expected files (${expect.filesAny.join(', ')})`);
+  }
   if (expect.noSharedModified && seen.sharedModified.length) reasons.push(`changed shared parts: ${seen.sharedModified.join(', ')}`);
 
   if (expect.noCodeInReply && CODE_IN_REPLY.test(seen.reply)) reasons.push('the reply shows code, file names or secrets');

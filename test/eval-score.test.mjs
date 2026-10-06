@@ -39,6 +39,12 @@ test('vague and hostile requests: asking passes; changing files or showing code 
   }
 });
 
+test('a built change must touch at least one of the expected files', () => {
+  const c = { expect: { outcome: ['preview'], filesAny: ['src/components/**'] } };
+  assert.equal(scoreCase(c, seen({ changedFiles: ['src/components/product/ProductCard.module.css'], judge: null })).pass, true);
+  assert.match(scoreCase(c, seen({ changedFiles: ['src/app/globals.css'], judge: null })).reasons[0], /none of the expected files/);
+});
+
 test('multi-turn, shared parts, Arabic and help checks', () => {
   assert.equal(scoreCase({ expect: { firstOutcome: ['plan'], outcome: ['preview'] } }, seen({ outcomes: ['plan', 'preview'] })).pass, true);
   assert.equal(scoreCase({ expect: { firstOutcome: ['plan'], outcome: ['preview'] } }, seen({ outcomes: ['preview'] })).pass, false);
