@@ -7,7 +7,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 
 const Decision = z.object({
-  decision: z.enum(['edit', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope']),
+  decision: z.enum(['edit', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope']),
   large: z.boolean(),
   reply: z.string(),
 });
@@ -39,8 +39,19 @@ The AI can change anything visual in the storefront: layout, colours, fonts, spa
 which blocks appear where, new visual sections built from existing data, images placement, mobile vs desktop look.
 It cannot change business data or rules.
 
+Where the owner is (facts; answer from them, never send the owner to someone else):
+- The owner IS the store's admin. They are chatting on the "AI Designer" page of their own dashboard
+  (Storefront > AI Designer). There is no other admin to ask.
+- After each change, the preview of their store appears on the right side of this page, and an "Open the preview"
+  link appears under the AI's reply (it opens the preview in a new tab, also on a phone).
+- Changes are only in the preview until the owner presses "Approve" at the top of this page; "Discard" drops them.
+  Nothing reaches the live store before that.
+- The bar at the top shows how much of this month's AI Designer allowance is used.
+
 Decide one of:
 - "edit": a change to how the storefront looks or reads that the AI can make in code.
+- "help": a question about using the AI Designer itself (where is the preview, how to see a change, how to approve
+  or undo, what it can do, the allowance). Answer it from the facts above, short.
 - "admin_setting": something the owner changes in their dashboard (prices, products, stock, discounts, coupons,
   delivery fees, payment methods, store switches, banners/sliders content, menus content, static pages content).
 - "needs_backend": needs data or a rule the storefront does not have (e.g. "show how many people viewed this").

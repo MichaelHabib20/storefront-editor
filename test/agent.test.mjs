@@ -149,6 +149,14 @@ test('an edit passes the checks, is committed on the draft and previewed', async
   assert.equal(chat.budget.spentUsd, 0.102);
 });
 
+test('a question about the AI Designer is answered with the running preview link', async () => {
+  triageAnswer = { decision: 'help', large: false, reply: 'Your preview is on the right of this page.' };
+  const chat = await runToEnd('where can I see my changes?');
+  assert.equal(chat.run.outcome, 'help');
+  assert.equal(agentCalls.length, 0);
+  assert.match(chat.messages.at(-1).preview, /^http:\/\/localhost:347\d$/);
+});
+
 test('a large request uses the strongest allowed model; the session continues', async () => {
   triageAnswer = { decision: 'edit', large: true, reply: 'A new home page.' };
   agentScript = [(cwd) => write(cwd, 'src/home.txt', 'new home')];

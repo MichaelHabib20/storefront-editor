@@ -143,7 +143,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const decision = await triage(text, chats.recent(storeId));
       charge({ kind: 'triage', model: decision.model, costUsd: decision.costUsd, usage: decision.usage });
       if (decision.decision !== 'edit') {
-        chats.say(storeId, 'assistant', decision.reply, { runId });
+        // a question about the AI Designer gets the store's preview link when one is running
+        const preview = decision.decision === 'help' ? previews.list().find((p) => p.id === storeId) : null;
+        chats.say(storeId, 'assistant', decision.reply, { runId, ...(preview ? { preview: preview.url } : {}) });
         outcome = decision.decision;
         return;
       }
