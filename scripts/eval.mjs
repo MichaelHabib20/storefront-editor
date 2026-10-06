@@ -74,6 +74,9 @@ function resolveTurn(turn) {
   if (turn === '{yes}') return options.find((o) => /yes|go ahead|نعم|تمام/i.test(o)) ?? 'Yes, go ahead';
   const pick = /^\{option:(\d+)\}$/.exec(turn);
   if (pick) return options[Number(pick[1])] ?? options[0] ?? 'Yes, go ahead';
+  // {option:/cards/} = the choice that matches, as an owner who wants that would tap it
+  const match = /^\{option:\/(.+)\/\}$/.exec(turn);
+  if (match) return options.find((o) => new RegExp(match[1], 'i').test(o)) ?? null;
   return turn;
 }
 
@@ -153,7 +156,10 @@ for (const testCase of todo) {
   try {
     await reset();
     for (const raw of testCase.turns) {
+      // a scripted answer ("{yes}", "{option:...}") is only given while the AI is still asking
+      if (raw.startsWith('{') && outcomes.at(-1) === 'preview') break;
       const text = resolveTurn(raw);
+      if (text === null) continue; // the AI did not offer that choice: it did not ask that question
       turns.push(text);
       const { done } = await app.runner.send(STORE, text);
       await done;
