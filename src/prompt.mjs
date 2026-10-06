@@ -61,7 +61,8 @@ export function systemPrompt(workspace, { eyes = false } = {}) {
  * itself (including the turns triage answered, which the editing AI never saw), and the owner's latest words.
  */
 export function taskPrompt({ task, latest, recent = [], shared = false }) {
-  const conversation = recent.length ? recent.map((m) => `${m.role === 'merchant' ? 'Owner' : 'AI Designer'}: ${m.text}`).join('\n') : '(none)';
+  const who = { merchant: 'Owner', assistant: 'AI Designer', system: 'Page' };
+  const conversation = recent.length ? recent.map((m) => `${who[m.role] ?? 'AI Designer'}: ${m.text}`).join('\n') : '(none)';
   return `The owner's request, as understood from the whole conversation:
 ${task || latest}
 

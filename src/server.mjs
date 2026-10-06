@@ -164,6 +164,8 @@ export function createApp(config = loadConfig(), deps = {}) {
       'access-control-allow-origin': '*',
       'x-accel-buffering': 'no',
     });
+    // note: Cloudflare *quick* tunnels (trycloudflare.com) do not pass server-sent events on; the admin page then
+    // keeps polling. Named tunnels and normal proxies stream them.
     res.write('retry: 3000\n\n');
     const push = (chat) => res.write(`event: chat\ndata: ${JSON.stringify(view(id, chat))}\n\n`);
     push(chats.get(id));

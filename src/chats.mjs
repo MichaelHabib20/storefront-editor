@@ -7,6 +7,13 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
+/** What a page note means for the AI. */
+function systemNote(text) {
+  if (/^Discarded/i.test(text)) return '[The owner pressed Discard: every change not yet approved was thrown away; the store is back to its last approved look.]';
+  if (/^Approved/i.test(text)) return '[The owner pressed Approve: the changes so far are kept.]';
+  return `[${text}]`;
+}
+
 export function createChats(dataDir) {
   const dir = path.join(dataDir, 'chats');
   const fileOf = (storeId) => path.join(dir, `${storeId}.json`);
@@ -52,10 +59,14 @@ export function createChats(dataDir) {
       return message;
     },
 
-    /** The last few messages, for triage context. */
+    /**
+     * The last few messages, for the AI's context — including the page's own notes ("Approved.", "Discarded."), so
+     * it knows a change it made earlier is gone (or live) now.
+     */
     recent(storeId, count = 6) {
       return read(storeId)
-        .messages.filter((m) => m.role === 'merchant' || m.role === 'assistant')
+        .messages.filter((m) => ['merchant', 'assistant', 'system'].includes(m.role))
+        .map((m) => (m.role === 'system' ? { ...m, text: systemNote(m.text) } : m))
         .slice(-count);
     },
   };

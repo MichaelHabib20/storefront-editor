@@ -359,6 +359,12 @@ test('one message at a time; an empty budget refuses', async () => {
   assert.equal((await call('POST', '/stores/acme/messages', { text: '  ' })).status, 422);
 });
 
+test('after Discard the AI is told the earlier change is gone', async () => {
+  app.chats.say('acme', 'system', 'Discarded.');
+  const recent = app.chats.recent('acme', 3);
+  assert.match(recent.at(-1).text, /pressed Discard/);
+});
+
 test('approve merges the draft into the store copy; discard drops it', async () => {
   const approved = await call('POST', '/stores/acme/draft/approve');
   assert.equal(approved.status, 200);
