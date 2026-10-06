@@ -149,6 +149,25 @@ test('an edit passes the checks, is committed on the draft and previewed', async
   assert.equal(chat.budget.spentUsd, 0.102);
 });
 
+test('the editing AI gets the resolved task and the whole conversation, not just the last words', async () => {
+  triageAnswer = { decision: 'unclear', large: false, task: '', reply: 'What kind of new design for "Add to Cart"?' };
+  await runToEnd('can u make my add to cart in a new design');
+  triageAnswer = {
+    decision: 'edit',
+    large: false,
+    task: 'Replace the "Add to Cart" text on the product card buttons with a shopping cart icon; the header cart icon stays as it is.',
+    reply: 'I will show a cart icon on the Add to Cart buttons.',
+  };
+  agentScript = [async () => ({ text: 'Which buttons do you mean?' })];
+  await runToEnd('make it icon');
+
+  const prompt = agentCalls[0].prompt;
+  assert.match(prompt, /Replace the "Add to Cart" text on the product card buttons/);
+  assert.match(prompt, /can u make my add to cart in a new design/, 'the turn triage answered reaches the editing AI');
+  assert.match(prompt, /What kind of new design for "Add to Cart"\?/);
+  assert.match(prompt, /latest message: make it icon/);
+});
+
 test('a question about the AI Designer is answered with the running preview link', async () => {
   triageAnswer = { decision: 'help', large: false, reply: 'Your preview is on the right of this page.' };
   const chat = await runToEnd('where can I see my changes?');

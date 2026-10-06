@@ -8,7 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
-import { fixPrompt, systemPrompt } from './prompt.mjs';
+import { fixPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
 import { PreviewError } from './preview.mjs';
 import { must, run } from './run.mjs';
@@ -155,7 +155,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       await ensureDraft(storeId, cwd);
       setRun(storeId, { state: 'editing', model });
 
-      let turn = await agentTurn(storeId, { prompt: text, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd });
+      // the editing AI gets the job triage resolved plus the conversation, not just the owner's last few words
+      const prompt = taskPrompt({ task: decision.task, latest: text, recent: chats.recent(storeId, 12) });
+      let turn = await agentTurn(storeId, { prompt, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd });
       charge(turn.charge, true);
 
       for (let round = 0; ; round++) {
@@ -227,7 +229,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         log('settle failed', storeId, runId, error);
         ledger.release(reservation);
       }
-      setRun(storeId, { state: 'done', outcome, costUsd: Math.max(0, spent - refunded), budget: status });
+      setRun(storeId, { state: 'done', outcome, costUsd: Math.round(Math.max(0, spent - refunded) * 1e6) / 1e6, budget: status });
       log('run done', storeId, runId, outcome, spent.toFixed(4));
     }
   }

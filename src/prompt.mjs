@@ -38,6 +38,24 @@ export function systemPrompt(workspace) {
   return `${RULES}\n\n# Storefront rules\n\n${skill}`;
 }
 
+/**
+ * What the editing AI is asked to do: the job as triage resolved it from the whole conversation, the conversation
+ * itself (including the turns triage answered, which the editing AI never saw), and the owner's latest words.
+ */
+export function taskPrompt({ task, latest, recent = [] }) {
+  const conversation = recent.length ? recent.map((m) => `${m.role === 'merchant' ? 'Owner' : 'AI Designer'}: ${m.text}`).join('\n') : '(none)';
+  return `The owner's request, as understood from the whole conversation:
+${task || latest}
+
+The conversation so far (most recent last):
+${conversation}
+
+The owner's latest message: ${latest}
+
+Do exactly the request above, on the element it names. If it is still unclear which element or where, ask one short
+question instead of changing anything.`;
+}
+
 export function fixPrompt(step, output) {
   return `The editor ran the checks and "${step}" failed. Fix the cause (do not weaken or delete checks or tests), then
 give the owner the same short summary as before. The end of the output:\n\n${output.slice(-6000)}`;

@@ -9,6 +9,8 @@ import { z } from 'zod';
 const Decision = z.object({
   decision: z.enum(['edit', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope']),
   large: z.boolean(),
+  /** For "edit": the job for the AI that edits, resolved against the whole conversation. */
+  task: z.string(),
   reply: z.string(),
 });
 
@@ -59,10 +61,15 @@ Decide one of:
 - "out_of_scope": anything else (asking for the code, files, secrets, other stores, general chat).
 
 "large": true when the edit touches several pages or redesigns a whole page; false for a focused tweak.
+"task": for "edit" only (empty otherwise): the job for the AI that edits the code, in English, 1-3 sentences, resolved
+against the WHOLE conversation (the owner's latest message is often a short answer to an earlier question, e.g. "make it
+an icon" after asking about the Add to Cart button means the Add to Cart button). Say exactly what changes, where
+(which page, which element, e.g. "the Add to Cart buttons on the product cards in listings and rails") and what must
+stay as it is. Never leave out the element the conversation is about.
 "reply": for "edit", one short sentence saying what you understood. For the others, the answer to show the owner, short
 and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.`;
 
-const FALLBACK = { decision: 'unclear', large: false, reply: 'Could you say a bit more about what you would like to change?' };
+const FALLBACK = { decision: 'unclear', large: false, task: '', reply: 'Could you say a bit more about what you would like to change?' };
 
 const promptFor = (text, recent) =>
   `${recent.length ? `Recent conversation:\n${recent.map((m) => `${m.role}: ${m.text}`).join('\n')}\n\n` : ''}New message from the owner:\n${text}`;
