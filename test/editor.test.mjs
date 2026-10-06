@@ -9,6 +9,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { must } from '../src/run.mjs';
 import { createApp } from '../src/server.mjs';
+import { createStores } from '../src/stores.mjs';
 
 let dir, starter, app, base;
 
@@ -58,6 +59,7 @@ before(async () => {
     checks: [['node', ['check.mjs']]],
     build: ['node', ['build.mjs']],
     serve: ['node', ['serve.mjs', '{port}']],
+    previewMode: 'production',
     previewPorts: [3451, 3460],
   });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
@@ -145,6 +147,30 @@ test('serves a preview with the store API settings', async () => {
 
   assert.equal((await call('DELETE', '/stores/acme/preview')).body.stopped, true);
   assert.deepEqual((await call('GET', '/previews')).body.previews, []);
+});
+
+test('a dev preview skips the build and is reused while it runs', async () => {
+  const first = await app.previews.start('acme', { production: false });
+  const second = await app.previews.start('acme', { production: false });
+  assert.equal(second.port, first.port);
+  assert.equal(app.previews.list()[0].mode, 'dev');
+  await app.previews.stop('acme');
+});
+
+test('the quick checks get only the changed code files', async () => {
+  const workspace = app.stores.workspaceOf('acme');
+  await fs.writeFile(path.join(workspace, 'args.mjs'), "import fs from 'node:fs'; fs.writeFileSync('args.json', JSON.stringify(process.argv.slice(2)));\n");
+  const stores = createStores({ starterRepo: starter, workspacesDir: path.join(dir, 'workspaces'), dataDir: path.join(dir, 'data'), checks: [['node', ['args.mjs', '--files', '{codeFiles}']]] });
+  assert.equal((await stores.check('acme', { files: ['public/logo.png'] })).ok, true);
+  await assert.rejects(fs.access(path.join(workspace, 'args.json')), 'no code files: the command is skipped');
+  assert.equal((await stores.check('acme', { files: ['src/a.tsx', 'b.css', 'src/c.ts'] })).ok, true);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(workspace, 'args.json'), 'utf8')), ['--files', 'src/a.tsx', 'src/c.ts']);
+  await fs.rm(path.join(workspace, 'args.mjs'));
+  await fs.rm(path.join(workspace, 'args.json'));
+});
+
+test('store copies must be on the starter drive', () => {
+  assert.throws(() => createStores({ starterRepo: 'D:/repo', workspacesDir: 'C:/ws', dataDir: 'C:/data' }), /same drive/);
 });
 
 test('a failed build is reported with its output', async () => {

@@ -17,18 +17,31 @@ export function loadConfig(env = process.env) {
     /** stores.json and change records. */
     dataDir: env.EDITOR_DATA_DIR ?? path.join(root, 'data'),
     /**
-     * The checks a change must pass before a preview (the storefront's `verify` without the e2e run, which needs
-     * the mock API and minutes; the full `verify` runs before a publish).
+     * Quick checks after each edit, before the preview: types, the rules, and lint + tests for the changed files
+     * only (`{codeFiles}` = the changed .ts/.tsx/.js files; a command whose list is empty is skipped). Minutes
+     * matter here: the merchant is waiting in the chat.
      */
     checks: JSON.parse(env.EDITOR_CHECKS ?? 'null') ?? [
+      ['npx', ['tsc', '--noEmit']],
+      ['npm', ['run', 'check:rules']],
+      ['npx', ['eslint', '--max-warnings=0', '{codeFiles}']],
+      ['npx', ['vitest', 'related', '--run', '--passWithNoTests', '{codeFiles}']],
+    ],
+    /** The full checks: starter updates now, and before a publish (step 5, with the production build). */
+    fullChecks: JSON.parse(env.EDITOR_FULL_CHECKS ?? 'null') ?? [
       ['npm', ['run', 'typecheck']],
       ['npm', ['run', 'lint']],
       ['npm', ['run', 'check:rules']],
       ['npm', ['run', 'test']],
     ],
-    /** How a workspace is built for a preview, and how a preview is served (`{port}` is replaced). */
+    /**
+     * Previews: `dev` keeps a dev server per store running and it picks up each edit in seconds; `production`
+     * builds and serves (slow: minutes per change; used for publishing). `{port}` is replaced.
+     */
+    previewMode: env.EDITOR_PREVIEW_MODE ?? 'dev',
     build: JSON.parse(env.EDITOR_BUILD ?? 'null') ?? ['npx', ['next', 'build']],
     serve: JSON.parse(env.EDITOR_SERVE ?? 'null') ?? ['npx', ['next', 'start', '-p', '{port}']],
+    devServe: JSON.parse(env.EDITOR_DEV_SERVE ?? 'null') ?? ['npx', ['next', 'dev', '-p', '{port}']],
     /** Ports previews are served on. */
     previewPorts: [Number(env.EDITOR_PREVIEW_PORT_FROM ?? 3301), Number(env.EDITOR_PREVIEW_PORT_TO ?? 3399)],
     /** Models and spending limits (static for now, agent design §6). */

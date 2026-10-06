@@ -72,7 +72,7 @@ export function createPreviews(config, stores, env = process.env) {
 
   return {
     list() {
-      return [...running.entries()].map(([id, p]) => ({ id, port: p.port, url: `http://localhost:${p.port}`, startedAt: p.startedAt, commit: p.commit }));
+      return [...running.entries()].map(([id, p]) => ({ id, port: p.port, mode: p.mode, url: `http://localhost:${p.port}`, startedAt: p.startedAt, commit: p.commit }));
     },
 
     stop,
@@ -81,19 +81,32 @@ export function createPreviews(config, stores, env = process.env) {
       for (const id of [...running.keys()]) await stop(id);
     },
 
-    /** Builds and serves the store's copy as it is now; resolves once the preview answers. */
-    async start(id) {
+    /**
+     * Shows the store's copy as it is now; resolves once the preview answers.
+     * `dev` mode: one dev server per store, kept running; it picks up edits itself, so a running one is reused.
+     * `production` mode (or `production: true`): build, then serve; restarts every time.
+     */
+    async start(id, { production = config.previewMode === 'production' } = {}) {
       const store = await stores.get(id);
       const cwd = stores.workspaceOf(id);
       const envFor = storeEnv(store);
+      const current = running.get(id);
+      if (!production && current?.mode === 'dev' && current.child.exitCode === null) {
+        // already serving this folder: ask for the home page so the edit is compiled before the merchant looks
+        await waitForHttp(`http://127.0.0.1:${current.port}/`, 180_000, () => current.child.exitCode === null);
+        current.commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
+        return { id, port: current.port, url: `http://localhost:${current.port}`, commit: current.commit };
+      }
       await stop(id);
 
-      const [buildCommand, buildArgs] = config.build;
-      const built = await run(buildCommand, buildArgs, { cwd, env: envFor });
-      if (built.code !== 0) throw new PreviewError('build_failed', 'The preview build failed.', built.output.slice(-20_000));
+      if (production) {
+        const [buildCommand, buildArgs] = config.build;
+        const built = await run(buildCommand, buildArgs, { cwd, env: envFor });
+        if (built.code !== 0) throw new PreviewError('build_failed', 'The preview build failed.', built.output.slice(-20_000));
+      }
 
       const port = await freePort();
-      const [serveCommand, serveArgs] = config.serve;
+      const [serveCommand, serveArgs] = production ? config.serve : config.devServe ?? config.serve;
       const child = spawn(serveCommand, serveArgs.map((a) => a.replaceAll('{port}', String(port))), {
         cwd,
         env: { ...process.env, ...envFor, PORT: String(port) },
@@ -111,8 +124,9 @@ export function createPreviews(config, stores, env = process.env) {
       });
 
       const commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
-      running.set(id, { port, child, startedAt: new Date().toISOString(), commit });
-      const up = await waitForHttp(`http://127.0.0.1:${port}/`, 60_000, () => child.exitCode === null);
+      running.set(id, { port, child, mode: production ? 'production' : 'dev', startedAt: new Date().toISOString(), commit });
+      // a dev server compiles the first page on request: allow it minutes, not seconds
+      const up = await waitForHttp(`http://127.0.0.1:${port}/`, production ? 60_000 : 180_000, () => child.exitCode === null);
       if (!up) {
         await stop(id);
         throw new PreviewError('serve_failed', 'The preview did not start.', output);

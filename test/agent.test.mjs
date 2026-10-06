@@ -87,6 +87,7 @@ before(async () => {
       checks: [['node', ['check.mjs']]],
       build: ['node', ['build.mjs']],
       serve: ['node', ['serve.mjs', '{port}']],
+      previewMode: 'production',
       previewPorts: [3471, 3480],
       aiConfigFile,
     },

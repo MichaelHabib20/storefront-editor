@@ -32,6 +32,11 @@ export async function unlinkModules(workspace) {
 }
 
 export function createStores(config) {
+  // Next.js cannot build through a node_modules link to another drive ("Can't resolve './D:/...'")
+  const driveOf = (p) => path.parse(path.resolve(p)).root.toLowerCase();
+  if (driveOf(config.workspacesDir) !== driveOf(config.starterRepo)) {
+    throw new StoreError('bad_config', `Store copies must be on the same drive as the starter (${config.starterRepo}), not ${config.workspacesDir}.`);
+  }
   const file = path.join(config.dataDir, 'stores.json');
   const branchOf = (id) => `store/${id}`;
   const workspaceOf = (id) => path.join(config.workspacesDir, id);
@@ -58,12 +63,18 @@ export function createStores(config) {
     return (await run('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: config.starterRepo })).code === 0;
   }
 
-  /** Runs the configured checks in a workspace, in order; stops at the first that fails. */
-  async function check(id) {
+  /**
+   * Runs checks in a workspace, in order; stops at the first that fails. `files` (the changed files) fills
+   * `{codeFiles}`; `full` runs the full checks instead of the quick ones.
+   */
+  async function check(id, { files = [], full = false } = {}) {
     const cwd = workspaceOf(id);
-    for (const [command, args] of config.checks) {
+    const codeFiles = files.filter((f) => /\.(ts|tsx|js|jsx|mjs)$/.test(f));
+    for (const [command, template] of full ? config.fullChecks ?? config.checks : config.checks) {
+      if (template.includes('{codeFiles}') && codeFiles.length === 0) continue;
+      const args = template.flatMap((a) => (a === '{codeFiles}' ? codeFiles : [a]));
       const result = await run(command, args, { cwd });
-      if (result.code !== 0) return { ok: false, step: `${command} ${args.join(' ')}`, output: result.output.slice(-20_000) };
+      if (result.code !== 0) return { ok: false, step: `${command} ${template.filter((a) => a !== '{codeFiles}').join(' ')}`, output: result.output.slice(-20_000) };
     }
     return { ok: true, step: null, output: '' };
   }
@@ -133,7 +144,7 @@ export function createStores(config) {
       const after = (await must('git', ['rev-parse', 'HEAD'], { cwd })).trim();
       if (after === before) return { ok: true, reason: 'up_to_date', output: '' };
 
-      const checked = await check(id);
+      const checked = await check(id, { full: true });
       if (!checked.ok) {
         await must('git', ['reset', '--hard', before], { cwd });
         return { ok: false, reason: 'check_failed', step: checked.step, output: checked.output };

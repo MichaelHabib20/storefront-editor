@@ -172,7 +172,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
 
         setRun(storeId, { state: 'checking', round, files: changed.length });
         let failure = null;
-        const checked = await stores.check(storeId);
+        const checked = await stores.check(storeId, { files: changed });
         if (!checked.ok) failure = { step: checked.step, output: checked.output };
         else {
           setRun(storeId, { state: 'building_preview' });
@@ -193,6 +193,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           }
         }
 
+        // kept on the run for us (debugging, evals); never shown to the merchant
+        setRun(storeId, { lastFailure: { round, step: failure.step, output: String(failure.output ?? '').slice(-4000) } });
         if (round >= settings.maxFixRounds) throw new ChangeError('checks_failed', `Still failing after ${round} fix rounds (${failure.step}).`);
         setRun(storeId, { state: 'fixing', round: round + 1 });
         turn = await agentTurn(storeId, { prompt: fixPrompt(failure.step, failure.output), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd });
@@ -236,6 +238,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const reservation = ledger.reserve(storeId);
       const runId = randomUUID();
       chats.say(storeId, 'merchant', text.trim(), { runId });
+      chats.update(storeId, (chat) => {
+        chat.run = null;
+      });
       setRun(storeId, { id: runId, state: 'triage', startedAt: new Date().toISOString(), outcome: null, round: 0 });
       const done = work(storeId, runId, text.trim(), reservation);
       return { runId, done };
