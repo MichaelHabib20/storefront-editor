@@ -61,6 +61,7 @@ before(async () => {
     serve: ['node', ['serve.mjs', '{port}']],
     previewMode: 'production',
     previewPorts: [3451, 3460],
+    previewPublicUrls: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [3451 + i, `https://preview-${3451 + i}.example.test`])),
   });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${app.server.address().port}`;
@@ -141,7 +142,8 @@ test('a starter update that breaks the checks is reverted', async () => {
 test('serves a preview with the store API settings', async () => {
   const started = await call('POST', '/stores/acme/preview');
   assert.equal(started.status, 200, JSON.stringify(started.body));
-  const page = await (await fetch(started.body.url.replace('localhost', '127.0.0.1'))).text();
+  assert.equal(started.body.url, `https://preview-${started.body.port}.example.test`);
+  const page = await (await fetch(`http://127.0.0.1:${started.body.port}/`)).text();
   assert.equal(page, 'https://api.acme.test|secret-key|acme page');
   assert.deepEqual((await call('GET', '/previews')).body.previews.map((p) => p.id), ['acme']);
 
@@ -154,6 +156,7 @@ test('a dev preview skips the build and is reused while it runs', async () => {
   const second = await app.previews.start('acme', { production: false });
   assert.equal(second.port, first.port);
   assert.equal(app.previews.list()[0].mode, 'dev');
+  assert.equal(first.url, `https://preview-${first.port}.example.test`, 'a mapped port gets its public address');
   await app.previews.stop('acme');
 });
 

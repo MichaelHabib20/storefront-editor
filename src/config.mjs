@@ -42,6 +42,11 @@ export function loadConfig(env = process.env) {
     build: JSON.parse(env.EDITOR_BUILD ?? 'null') ?? ['npx', ['next', 'build']],
     serve: JSON.parse(env.EDITOR_SERVE ?? 'null') ?? ['npx', ['next', 'start', '-p', '{port}']],
     devServe: JSON.parse(env.EDITOR_DEV_SERVE ?? 'null') ?? ['npx', ['next', 'dev', '-p', '{port}']],
+    /**
+     * The address the merchant opens for a preview port, when previews are reached through a proxy or tunnel
+     * (e.g. {"3301":"https://x.trycloudflare.com"}); default http://localhost:<port>.
+     */
+    previewPublicUrls: JSON.parse(env.EDITOR_PREVIEW_PUBLIC_URLS ?? '{}'),
     /** Ports previews are served on. */
     previewPorts: [Number(env.EDITOR_PREVIEW_PORT_FROM ?? 3301), Number(env.EDITOR_PREVIEW_PORT_TO ?? 3399)],
     /** Models and spending limits (static for now, agent design §6). */

@@ -62,6 +62,7 @@ function killTree(child) {
 export function createPreviews(config, stores, env = process.env) {
   /** id -> { port, child, startedAt, commit } */
   const running = new Map();
+  const urlFor = (port) => config.previewPublicUrls?.[String(port)] ?? `http://localhost:${port}`;
 
   function storeEnv(store) {
     const key = store.apiKeyEnv ? env[store.apiKeyEnv] : undefined;
@@ -85,7 +86,7 @@ export function createPreviews(config, stores, env = process.env) {
 
   return {
     list() {
-      return [...running.entries()].map(([id, p]) => ({ id, port: p.port, mode: p.mode, url: `http://localhost:${p.port}`, startedAt: p.startedAt, commit: p.commit }));
+      return [...running.entries()].map(([id, p]) => ({ id, port: p.port, mode: p.mode, url: urlFor(p.port), startedAt: p.startedAt, commit: p.commit }));
     },
 
     stop,
@@ -108,7 +109,7 @@ export function createPreviews(config, stores, env = process.env) {
         // already serving this folder: open the home page so the edit is compiled before the merchant looks
         await warm(`http://127.0.0.1:${current.port}/`);
         current.commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
-        return { id, port: current.port, url: `http://localhost:${current.port}`, commit: current.commit };
+        return { id, port: current.port, url: urlFor(current.port), commit: current.commit };
       }
       await stop(id);
 
@@ -144,7 +145,7 @@ export function createPreviews(config, stores, env = process.env) {
         throw new PreviewError('serve_failed', 'The preview did not start.', output);
       }
       if (!production) await warm(`http://127.0.0.1:${port}/`);
-      return { id, port, url: `http://localhost:${port}`, commit };
+      return { id, port, url: urlFor(port), commit };
     },
   };
 }
