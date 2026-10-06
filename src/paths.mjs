@@ -19,10 +19,16 @@ function toRegExp(pattern) {
   return new RegExp(`^${source}$`);
 }
 
-export function createFilePolicy({ editable, locked }) {
+export function createFilePolicy({ editable, locked, shared = [] }) {
   const allow = editable.map(toRegExp);
   const deny = locked.map(toRegExp);
+  const common = shared.map(toRegExp);
   return {
+    /** Parts used across the whole store (site colours, shared components): changing them changes every page. */
+    isShared(relative) {
+      const p = relative.replaceAll('\\', '/');
+      return common.some((r) => r.test(p));
+    },
     /** @param {string} relative workspace-relative path */
     canEdit(relative) {
       const p = relative.replaceAll('\\', '/');

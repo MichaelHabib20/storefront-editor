@@ -66,6 +66,7 @@ before(async () => {
   await write(starter, '.gitignore', 'built.txt\nnode_modules\n');
   await write(starter, 'src/page.txt', 'v1');
   await write(starter, 'src/money/price.txt', 'locked');
+  await write(starter, 'src/shared/icons.txt', 'bag: bag-shape\n');
   await git(['add', '.']);
   await git(['commit', '-q', '-m', 'starter']);
 
@@ -75,7 +76,7 @@ before(async () => {
     JSON.stringify({
       defaults: { editModel: 'claude-sonnet-5-5', triageModel: 'claude-haiku-4-5', allowedModels: ['claude-sonnet-5-5', 'claude-opus-5-5'], routing: 'auto', effort: 'medium', monthlyLimitUsd: 5, perRequestMaxUsd: 1, minToStartUsd: 0.05, warnAt: 0.8, maxTurns: 10, maxFixRounds: 1 },
       stores: { poor: { monthlyLimitUsd: 0.01 } },
-      files: { editable: ['src/**'], locked: ['src/money/**'], generated: [] },
+      files: { editable: ['src/**'], locked: ['src/money/**'], generated: [], shared: ['src/shared/**'] },
     }),
   );
   app = createApp(
@@ -123,6 +124,17 @@ test('the file guard allows editable files only and never secrets', async () => 
   assert.equal(denied(await guard({ tool_name: 'Read', tool_input: { file_path: '/elsewhere/secrets.txt' } })), true);
   assert.equal(denied(await guard({ tool_name: 'Read', tool_input: { file_path: '/ws/src/money/Price.tsx' } })), false);
   assert.equal(denied(await guard({ tool_name: 'Grep', tool_input: { pattern: 'x' } })), false);
+});
+
+test('the shipped shared-parts list matches the store frame, the site styles and the ui blocks only', async () => {
+  const { files } = JSON.parse(await fs.readFile(new URL('../config/ai.json', import.meta.url), 'utf8'));
+  const policy = createFilePolicy(files);
+  for (const file of ['src/app/globals.css', 'src/components/ui/Icon.tsx', 'src/components/layout/SiteHeader.tsx', 'src/app/[locale]/layout.tsx']) {
+    assert.equal(policy.isShared(file), true, file);
+  }
+  for (const file of ['src/components/product/ProductCard.tsx', 'src/app/[locale]/page.tsx', 'src/app/x/layout.tsx', 'src/lib/i18n.ts']) {
+    assert.equal(policy.isShared(file), false, file);
+  }
 });
 
 test('a non-edit message is answered by triage alone', async () => {
@@ -205,6 +217,39 @@ test('questions and plans carry tap-able choices, cleaned', async () => {
   triageAnswer = { decision: 'help', large: false, confirm: false, task: '', reply: 'The preview is on the right.', options: ['ignored'] };
   const help = await runToEnd('where is the preview?');
   assert.equal(help.messages.at(-1).options, undefined, 'only questions and plans carry choices');
+});
+
+test('a change to an existing shared part the request was not about is undone and asked about', async () => {
+  triageAnswer = { decision: 'edit', large: false, confirm: false, shared: false, task: 'Show a cart icon on the product card buttons.', reply: 'On it.' };
+  agentScript = [(cwd) => write(cwd, 'src/shared/icons.txt', 'bag: cart-shape\n')];
+  const asked = await runToEnd('make the add to cart buttons an icon');
+  assert.equal(asked.run.outcome, 'needs_confirmation');
+  assert.match(asked.messages.at(-1).text, /everywhere/);
+  assert.deepEqual(asked.messages.at(-1).options, ['Yes, everywhere', 'No, only where I asked']);
+  assert.equal((await fs.readFile(path.join(workspace, 'src/shared/icons.txt'), 'utf8')).replace(/\r\n/g, '\n'), 'bag: bag-shape\n', 'the shared part is back as it was');
+  assert.equal(asked.run.costUsd, 0.001, 'only the triage is charged');
+
+  // "yes, everywhere": the same job, now allowed to change shared parts
+  triageAnswer = { decision: 'go_ahead', large: false, confirm: false, shared: false, task: '', reply: 'On it.' };
+  agentScript = [(cwd) => write(cwd, 'src/shared/icons.txt', 'bag: cart-shape\n')];
+  agentCalls.length = 0;
+  const built = await runToEnd('Yes, everywhere');
+  assert.equal(built.run.outcome, 'preview');
+  assert.match(agentCalls[0].prompt, /shared, store-wide part: changing it is expected/);
+});
+
+test('adding to a shared part (a new icon) is fine; asked in Arabic, the question is Arabic', async () => {
+  triageAnswer = { decision: 'edit', large: false, confirm: false, shared: false, task: 'Add a heart icon to the product cards.', reply: 'On it.' };
+  agentScript = [(cwd) => fs.appendFile(path.join(cwd, 'src/shared/icons.txt'), 'heart: heart-shape\n')];
+  const added = await runToEnd('add a heart icon on the cards');
+  assert.equal(added.run.outcome, 'preview');
+
+  triageAnswer = { decision: 'edit', large: false, confirm: false, shared: false, task: 'Change the cart icon on the product cards.', reply: 'تمام' };
+  agentScript = [(cwd) => write(cwd, 'src/shared/icons.txt', 'bag: other\n')];
+  agentCalls.length = 0;
+  const asked = await runToEnd('غيّر أيقونة السلة في كروت المنتجات');
+  assert.equal(asked.run.outcome, 'needs_confirmation');
+  assert.deepEqual(asked.messages.at(-1).options, ['نعم، في كل مكان', 'لا، فقط حيث طلبت']);
 });
 
 test('a question about the AI Designer is answered with the running preview link', async () => {

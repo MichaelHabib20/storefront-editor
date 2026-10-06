@@ -11,6 +11,8 @@ const Decision = z.object({
   large: z.boolean(),
   /** For "edit": show the plan and wait for the owner's OK instead of building now. */
   confirm: z.boolean(),
+  /** For "edit": the request is about something the same across the whole store (site colours, header, an icon everywhere). */
+  shared: z.boolean(),
   /** For "edit": the job for the AI that edits, resolved against the whole conversation. */
   task: z.string(),
   reply: z.string(),
@@ -92,6 +94,10 @@ against the WHOLE conversation (the owner's latest message is often a short answ
 an icon" after asking about the Add to Cart button means the Add to Cart button). Say exactly what changes, where
 (which page, which element, e.g. "the Add to Cart buttons on the product cards in listings and rails") and what must
 stay as it is. Never leave out the element the conversation is about.
+"shared": for "edit" only. true when the owner asks for something that is the same across the whole store: the main
+or brand colours, fonts, the header, the footer, the menu, an icon everywhere it appears. false when the request is about
+one element or one page (e.g. "the add to cart buttons on the product cards"), even if a site-wide change could also
+do it.
 "options": short answers the owner can tap instead of typing, in their language, each under 40 characters:
 - "unclear": 2-4 concrete choices that answer your question (e.g. "Product cards", "Product page", "Both").
 - "edit" with "confirm": true: "Yes, go ahead" plus 1-2 alternatives when there is an obvious one.
@@ -99,7 +105,7 @@ stay as it is. Never leave out the element the conversation is about.
 "reply": for "edit", one short sentence saying what you understood. For the others, the answer to show the owner, short
 and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.`;
 
-const FALLBACK = { decision: 'unclear', large: false, confirm: true, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
+const FALLBACK = { decision: 'unclear', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
 
 const promptFor = (text, recent, { pending = null } = {}) =>
   `${recent.length ? `Recent conversation:\n${recent.map((m) => `${m.role}: ${m.text}`).join('\n')}\n\n` : ''}${

@@ -43,6 +43,20 @@ export function fileGuard(workspace, policy) {
   };
 }
 
+/** The question when a change would reach shared, store-wide parts; in Arabic when the owner writes Arabic. */
+export function askShared(ownerText) {
+  if (/[؀-ۿ]/.test(ownerText)) {
+    return {
+      text: 'هذا التعديل سيغيّر أيضًا أجزاء مشتركة تظهر في كل المتجر (مثل الأيقونات أو ألوان الموقع)، وليس فقط ما طلبته. هل أطبّقه في كل مكان، أم فقط حيث طلبت؟',
+      options: ['نعم، في كل مكان', 'لا، فقط حيث طلبت'],
+    };
+  }
+  return {
+    text: 'This change would also change parts used across your whole store (like the icons or the site colours), not only what you asked for. Should I change it everywhere, or only where you asked?',
+    options: ['Yes, everywhere', 'No, only where I asked'],
+  };
+}
+
 export function createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, query = sdkQuery, files, log = () => {} }) {
   const policy = createFilePolicy(files);
   const generated = files.generated ?? [];
@@ -73,6 +87,17 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     const names = (await git(['diff', '--cached', '--name-only', 'HEAD'], cwd)).split('\n').map((s) => s.trim()).filter(Boolean);
     await git(['reset', '-q'], cwd);
     return names;
+  }
+
+  /** Changed files whose existing lines were changed or removed (pure additions are not counted). */
+  async function modifiedFiles(cwd) {
+    await git(['add', '-A'], cwd);
+    const rows = (await git(['diff', '--cached', '--numstat', 'HEAD'], cwd)).split('\n').filter(Boolean);
+    await git(['reset', '-q'], cwd);
+    return rows
+      .map((row) => row.split('\t'))
+      .filter(([, deleted]) => deleted === '-' || Number(deleted) > 0)
+      .map(([, , file]) => file);
   }
 
   /** One Agent SDK call; returns the final message and what it cost beyond what the session had already spent. */
@@ -155,16 +180,16 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       // what gets built: a clear request now, or the plan the owner just accepted
       let job = null;
       if (decision.decision === 'go_ahead' && pending) {
-        job = { task: pending.task, large: pending.large };
+        job = { task: pending.task, large: pending.large, shared: !!pending.shared };
         chats.say(storeId, 'assistant', decision.reply || 'On it.', { runId, kind: 'understood' });
       } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
         // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
-        setPending(storeId, { task: decision.task, large: decision.large });
+        setPending(storeId, { task: decision.task, large: decision.large, shared: !!decision.shared });
         chats.say(storeId, 'assistant', decision.reply, { runId, kind: 'plan', options: cleanOptions(decision.options) });
         outcome = 'plan';
         return;
       } else if (decision.decision === 'edit') {
-        job = { task: decision.task, large: decision.large };
+        job = { task: decision.task, large: decision.large, shared: !!decision.shared };
         chats.say(storeId, 'assistant', decision.reply, { runId, kind: 'understood' });
       } else {
         // a question about the AI Designer gets the store's preview link when one is running
@@ -182,7 +207,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       setRun(storeId, { state: 'editing', model });
 
       // the editing AI gets the job triage resolved plus the conversation, not just the owner's last few words
-      const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, 12) });
+      const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, 12), shared: job.shared });
       let turn = await agentTurn(storeId, { prompt, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd });
       charge(turn.charge, true);
 
@@ -197,6 +222,17 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           // the agent explained instead of editing (needs the backend, a question...)
           chats.say(storeId, 'assistant', turn.text || 'I did not change anything.', { runId });
           outcome = 'no_change';
+          return;
+        }
+        // stop and ask: an existing shared part changed although the request was not about it
+        const sharedTouched = job.shared ? [] : (await modifiedFiles(cwd)).filter((file) => policy.isShared(file));
+        if (sharedTouched.length) {
+          setRun(storeId, { lastFailure: { round, step: 'shared parts changed', output: sharedTouched.join('\n') } });
+          await resetWorkspace(cwd);
+          setPending(storeId, { task: job.task, large: job.large, shared: true });
+          const question = askShared(text);
+          chats.say(storeId, 'assistant', question.text, { runId, kind: 'plan', options: question.options });
+          outcome = 'needs_confirmation';
           return;
         }
 
