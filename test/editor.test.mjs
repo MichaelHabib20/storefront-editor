@@ -45,6 +45,11 @@ before(async () => {
     "import fs from 'node:fs'; import http from 'node:http'; http.createServer((q, s) => s.end(fs.readFileSync('built.txt', 'utf8') + '|' + fs.readFileSync('page.txt', 'utf8'))).listen(Number(process.argv[2]), '127.0.0.1');\n",
   );
   await fs.writeFile(path.join(starter, '.gitignore'), 'built.txt\nnode_modules\n');
+  // the "dev server": stops answering when a HANG file newer than itself appears (a hung dev server)
+  await fs.writeFile(
+    path.join(starter, 'devserve.mjs'),
+    "import fs from 'node:fs'; import http from 'node:http'; const born = Date.now(); http.createServer((q, s) => { if (fs.existsSync('HANG') && fs.statSync('HANG').mtimeMs > born) return; s.end('dev ' + process.pid); }).listen(Number(process.argv[2]), '127.0.0.1');\n",
+  );
   await commitInStarter('page.txt', 'v1', 'starter v1');
   // installed dependencies the store copies share through a link
   await fs.mkdir(path.join(starter, 'node_modules', '.bin'), { recursive: true });
@@ -59,6 +64,8 @@ before(async () => {
     checks: [['node', ['check.mjs']]],
     build: ['node', ['build.mjs']],
     serve: ['node', ['serve.mjs', '{port}']],
+    devServe: ['node', ['devserve.mjs', '{port}']],
+    previewCheckMs: 1500,
     previewMode: 'production',
     previewPorts: [3451, 3460],
     previewPublicUrls: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [3451 + i, `https://preview-${3451 + i}.example.test`])),
@@ -157,6 +164,21 @@ test('a dev preview skips the build and is reused while it runs', async () => {
   assert.equal(second.port, first.port);
   assert.equal(app.previews.list()[0].mode, 'dev');
   assert.equal(first.url, `https://preview-${first.port}.example.test`, 'a mapped port gets its public address');
+  await app.previews.stop('acme');
+});
+
+test('a hung dev preview is noticed and restarted', async () => {
+  const workspace = app.stores.workspaceOf('acme');
+  const first = await app.previews.start('acme', { production: false });
+  const answer = async (port) => (await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) })).text();
+  const firstPid = await answer(first.port);
+  assert.equal(await app.previews.ensure('acme'), first.port, 'a healthy one is reused');
+
+  await new Promise((r) => setTimeout(r, 20));
+  await fs.writeFile(path.join(workspace, 'HANG'), '');
+  const port = await app.previews.ensure('acme');
+  assert.notEqual(await answer(port), firstPid, 'a new server answers');
+  await fs.rm(path.join(workspace, 'HANG'));
   await app.previews.stop('acme');
 });
 

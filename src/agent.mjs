@@ -107,9 +107,13 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
   /** One Agent SDK call; returns the final message and what it cost beyond what the session had already spent. */
   async function agentTurn(storeId, { prompt, model, settings, maxBudgetUsd, cwd, eyes = null }) {
     const chat = chats.get(storeId);
+    // a turn that hangs (a stuck tool, a stuck preview) ends instead of holding the store forever
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), config.turnTimeoutMs ?? 10 * 60_000);
     const stream = query({
       prompt,
       options: {
+        abortController: abort,
         cwd,
         model,
         effort: settings.effort,
@@ -130,10 +134,18 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     });
     let result = null;
     let sessionId = chat.sessionId;
-    for await (const message of stream) {
-      if (message.session_id) sessionId = message.session_id;
-      if (message.type === 'result') result = message;
+    try {
+      for await (const message of stream) {
+        if (message.session_id) sessionId = message.session_id;
+        if (message.type === 'result') result = message;
+      }
+    } catch (error) {
+      if (abort.signal.aborted) throw new ChangeError('timeout', 'The agent took too long.');
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
+    if (abort.signal.aborted) throw new ChangeError('timeout', 'The agent took too long.');
     if (!result) throw new ChangeError('agent_failed', 'The agent ended without a result.');
     const total = Number.isFinite(result.total_cost_usd) ? result.total_cost_usd : 0;
     // a resumed session's total starts from what its transcript saved; charge only the new part
@@ -159,10 +171,11 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     if (!browsers || config.previewMode !== 'dev') return null;
     try {
       setRun(storeId, { state: 'building_preview' });
-      const { port } = await previews.start(storeId);
+      await previews.start(storeId);
       return screenshotServer({
         pool: browsers,
-        baseUrl: () => `http://127.0.0.1:${port}`,
+        // checked before every shot: a hung dev server is restarted instead of blinding the agent
+        baseUrl: async () => `http://127.0.0.1:${await previews.ensure(storeId)}`,
         saveDir: path.join(config.dataDir, 'runs', runId),
         onShot: (file) => setRun(storeId, { screenshots: [...(chats.get(storeId).run?.screenshots ?? []), file] }),
       });

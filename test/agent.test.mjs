@@ -28,7 +28,9 @@ function fakeQuery({ prompt, options }) {
   agentCalls.push({ prompt, options });
   return (async function* () {
     yield { type: 'system', subtype: 'init', session_id: options.resume ?? 'session-1' };
-    const outcome = (await step?.(options.cwd, prompt)) ?? {};
+    // like the real SDK, an abort ends the turn with an error
+    const aborted = new Promise((_, reject) => options.abortController?.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    const outcome = (await Promise.race([Promise.resolve(step?.(options.cwd, prompt)), aborted])) ?? {};
     sessionTotal += outcome.cost ?? 0.1;
     yield { type: 'result', subtype: outcome.subtype ?? 'success', result: outcome.text ?? 'I changed it.', total_cost_usd: sessionTotal, modelUsage: {}, session_id: options.resume ?? 'session-1' };
   })();
@@ -90,6 +92,7 @@ before(async () => {
       serve: ['node', ['serve.mjs', '{port}']],
       previewMode: 'production',
       previewPorts: [3471, 3480],
+      turnTimeoutMs: 3000,
       aiConfigFile,
     },
     { triage: fakeTriage, query: fakeQuery, log: () => {} },
@@ -319,6 +322,19 @@ test('a change to a locked file is refused even if the hook was bypassed', async
   const chat = await runToEnd('change the price look');
   assert.equal(chat.run.outcome, 'outside_allowed_files');
   assert.equal(await fs.readFile(path.join(workspace, 'src/money/price.txt'), 'utf8'), 'locked');
+});
+
+test('a turn that hangs is stopped, rolled back and not charged', async () => {
+  triageAnswer = { decision: 'edit', large: false, confirm: false, shared: false, task: 'Make the header green.', reply: 'On it.' };
+  agentScript = [async (cwd) => {
+    await write(cwd, 'src/half.txt', 'half done');
+    await new Promise(() => {});
+  }];
+  const chat = await runToEnd('make the header green');
+  assert.equal(chat.run.outcome, 'timeout');
+  assert.match(chat.messages.at(-1).text, /not charged/);
+  assert.equal(chat.run.costUsd, 0.001, 'only the triage');
+  await assert.rejects(fs.access(path.join(workspace, 'src/half.txt')), 'the half-done edit is gone');
 });
 
 test('an agent that explains instead of editing changes nothing', async () => {

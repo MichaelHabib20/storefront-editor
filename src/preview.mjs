@@ -33,7 +33,7 @@ function waitForHttp(url, timeoutMs, isAlive) {
     const attempt = async () => {
       if (!isAlive()) return resolve(false);
       try {
-        await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(5000) });
+        await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(Math.min(5000, timeoutMs)) });
         return resolve(true);
       } catch {
         if (Date.now() > until) return resolve(false);
@@ -53,16 +53,24 @@ async function warm(url) {
   }
 }
 
+/** Stops a server and everything it started; resolves once it is gone (so its port is free again). */
 function killTree(child) {
-  if (child.exitCode !== null) return;
+  if (child.exitCode !== null) return Promise.resolve();
+  const gone = new Promise((resolve) => {
+    child.once('close', resolve);
+    setTimeout(resolve, 10_000).unref?.();
+  });
   if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
   else child.kill();
+  return gone;
 }
 
 export function createPreviews(config, stores, env = process.env) {
   /** id -> { port, child, startedAt, commit } */
   const running = new Map();
   const urlFor = (port) => config.previewPublicUrls?.[String(port)] ?? `http://localhost:${port}`;
+  /** How long a running dev server may take to answer before it counts as hung and is restarted. */
+  const checkMs = config.previewCheckMs ?? 20_000;
 
   function storeEnv(store) {
     const key = store.apiKeyEnv ? env[store.apiKeyEnv] : undefined;
@@ -80,7 +88,7 @@ export function createPreviews(config, stores, env = process.env) {
     const preview = running.get(id);
     if (!preview) return false;
     running.delete(id);
-    killTree(preview.child);
+    await killTree(preview.child);
     return true;
   }
 
@@ -100,16 +108,33 @@ export function createPreviews(config, stores, env = process.env) {
      * `dev` mode: one dev server per store, kept running; it picks up edits itself, so a running one is reused.
      * `production` mode (or `production: true`): build, then serve; restarts every time.
      */
+    /**
+     * The local port of the store's dev preview, after a quick check that it answers; a missing or hung one is
+     * (re)started. Used before every screenshot.
+     */
+    async ensure(id) {
+      const current = running.get(id);
+      if (current?.mode === 'dev' && current.child.exitCode === null && (await waitForHttp(`http://127.0.0.1:${current.port}/`, checkMs, () => current.child.exitCode === null))) {
+        return current.port;
+      }
+      const { port } = await this.start(id, { production: false });
+      return port;
+    },
+
     async start(id, { production = config.previewMode === 'production' } = {}) {
       const store = await stores.get(id);
       const cwd = stores.workspaceOf(id);
       const envFor = storeEnv(store);
       const current = running.get(id);
       if (!production && current?.mode === 'dev' && current.child.exitCode === null) {
-        // already serving this folder: open the home page so the edit is compiled before the merchant looks
-        await warm(`http://127.0.0.1:${current.port}/`);
-        current.commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
-        return { id, port: current.port, url: urlFor(current.port), commit: current.commit };
+        // already serving this folder — if it still answers: a hung dev server is restarted below
+        const answers = await waitForHttp(`http://127.0.0.1:${current.port}/`, checkMs, () => current.child.exitCode === null);
+        if (answers) {
+          // open the home page so the edit is compiled before the merchant looks
+          await warm(`http://127.0.0.1:${current.port}/`);
+          current.commit = (await run('git', ['rev-parse', 'HEAD'], { cwd })).output.trim();
+          return { id, port: current.port, url: urlFor(current.port), commit: current.commit };
+        }
       }
       await stop(id);
 

@@ -70,8 +70,10 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
       const context = await browser.newContext({ viewport: { width: VIEWPORTS[viewport].width, height: VIEWPORTS[viewport].height }, isMobile: VIEWPORTS[viewport].isMobile, deviceScaleFactor: VIEWPORTS[viewport].deviceScaleFactor });
       try {
         const page = await context.newPage();
-        await page.goto(new URL(pagePath, baseUrl).toString(), { waitUntil: 'load', timeout: 150_000 });
-        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+        // the content is what counts; images and late scripts get a little longer but never block the shot
+        await page.goto(new URL(pagePath, baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 120_000 });
+        await page.waitForLoadState('load', { timeout: 20_000 }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
         return await page.screenshot({ type: 'jpeg', quality: 70, fullPage });
       } finally {
         await context.close().catch(() => {});
@@ -116,7 +118,7 @@ export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, sh
           if (!pagePath) return { content: [{ type: 'text', text: 'Use a path on the store that starts with "/", e.g. "/en".' }], isError: true };
           try {
             index += 1;
-            const shot = await shoot(pool, { baseUrl: baseUrl(), path: pagePath, viewport: args.viewport ?? 'desktop', fullPage: !!args.fullPage, saveDir, index });
+            const shot = await shoot(pool, { baseUrl: await baseUrl(), path: pagePath, viewport: args.viewport ?? 'desktop', fullPage: !!args.fullPage, saveDir, index });
             onShot(shot.file);
             return {
               content: [
