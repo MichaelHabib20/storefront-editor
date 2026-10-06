@@ -25,6 +25,52 @@ after(async () => {
   await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
 });
 
+test('a shot can scroll to an element by its text, after closing the cookie banner', async () => {
+  const server = http.createServer((q, s) => {
+    s.setHeader('content-type', 'text/html');
+    s.end(`<html><body style="margin:0">
+      <div id="cookies" style="position:fixed;bottom:0;left:0;right:0;height:300px;background:#000;color:#fff">Cookies
+        <button onclick="document.getElementById('cookies').remove()">Accept</button></div>
+      <div style="height:3000px;background:#fff"></div>
+      <button style="background:#0a0;color:#fff;font-size:40px">Add to cart</button>
+      <div style="height:3000px"></div></body></html>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const shot = await takeScreenshot(pool, { baseUrl: `http://127.0.0.1:${server.address().port}`, path: '/', viewport: 'desktop', scrollTo: 'Add to cart', saveDir: path.join(dir, 'run2'), index: 1 });
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch();
+    try {
+      // read the saved picture back: the green button is on it, the black cookie banner is not
+      const page = await browser.newPage();
+      await page.setContent(`<canvas id=c></canvas><img id=i src="data:image/jpeg;base64,${shot.data}">`);
+      const colours = await page.evaluate(async () => {
+        const img = document.getElementById('i');
+        await img.decode();
+        const c = document.getElementById('c');
+        c.width = img.width;
+        c.height = img.height;
+        const g = c.getContext('2d');
+        g.drawImage(img, 0, 0);
+        const data = g.getImageData(0, 0, c.width, c.height).data;
+        let green = 0;
+        let black = 0;
+        for (let p = 0; p < data.length; p += 4) {
+          if (data[p] < 40 && data[p + 1] > 120 && data[p + 2] < 40) green++;
+          if (data[p] < 20 && data[p + 1] < 20 && data[p + 2] < 20) black++;
+        }
+        return { green, black, total: data.length / 4 };
+      });
+      assert.ok(colours.green > 500, `the button is in view (${colours.green} green pixels)`);
+      assert.ok(colours.black < colours.total * 0.05, 'the cookie banner was closed');
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    server.close();
+  }
+});
+
 test('the browser is never closed while a shot is still running, only after a quiet spell', async () => {
   let closed = 0;
   const fake = { isConnected: () => true, close: async () => void (closed += 1) };

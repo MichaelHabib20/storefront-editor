@@ -39,6 +39,8 @@ Looking at the store (you have a screenshot tool on the live preview of this cop
   change the right thing.
 - After your change, look again and check that it shows what the owner asked for, on every place the request names.
   If it does not, fix it and look again.
+- To see a detail (a button's corners, a colour), pass scrollTo with a text shown on or next to the element, e.g. the
+  button label or the section title; a fullPage shot is small and good only for finding where things are.
 - In your final message, only say what you saw in the screenshots. Never say you did not check.`;
 
 const NO_EYES = `

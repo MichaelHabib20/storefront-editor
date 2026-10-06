@@ -99,7 +99,7 @@ async function judge(testCase, caseDir) {
   const eyes = screenshotServer({ pool: browsers, baseUrl: () => `http://127.0.0.1:${preview.port}`, saveDir: path.join(caseDir, 'judge') });
   let result = null;
   for await (const message of query({
-    prompt: `You check a change on an online store. Take a screenshot of "${pagePath}" (viewport "${viewport}", fullPage ${fullPage}) with the screenshot tool, scroll by taking a fullPage shot if the element is not in view, then decide whether this is true:\n\n${check}\n\nAnswer pass=true only if you can see it is true. Give a one-sentence reason.`,
+    prompt: `You check a change on an online store. Use the screenshot tool on "${pagePath}" (viewport "${viewport}"${fullPage ? ', start with a fullPage shot to find things' : ''}). To see a detail up close, pass scrollTo with a text shown on or next to the element (a button label like "Add to cart", a section title, a product name); take a few shots if needed. Then decide whether this is true:\n\n${check}\n\nAnswer pass=true only if you can see it is true. Give a one-sentence reason.`,
     options: {
       model: JUDGE_MODEL,
       tools: [],
@@ -109,7 +109,7 @@ async function judge(testCase, caseDir) {
       settingSources: [],
       strictMcpConfig: true,
       persistSession: false,
-      maxTurns: 6,
+      maxTurns: 10,
       outputFormat: { type: 'json_schema', schema: { type: 'object', properties: { pass: { type: 'boolean' }, reason: { type: 'string' } }, required: ['pass', 'reason'], additionalProperties: false } },
     },
   })) {

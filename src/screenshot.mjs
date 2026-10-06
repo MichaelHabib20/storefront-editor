@@ -63,7 +63,13 @@ export function createBrowserPool({ launch = async () => (await import('playwrig
  * Takes one screenshot of `baseUrl + path` and saves it in `saveDir`.
  * @returns {Promise<{ data: string, file: string }>} base64 JPEG and the saved file name
  */
-export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport = 'desktop', fullPage = false, saveDir, index }) {
+/** Closes the cookie banner if it covers the page (English or Arabic button). */
+async function acceptCookies(page) {
+  const button = page.getByRole('button', { name: /^(accept|accept all|قبول|موافق)$/i }).first();
+  if (await button.isVisible({ timeout: 1000 }).catch(() => false)) await button.click({ timeout: 2000 }).catch(() => {});
+}
+
+export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport = 'desktop', fullPage = false, scrollTo = null, saveDir, index }) {
   const browser = await pool.get();
   try {
     const shoot = async () => {
@@ -74,7 +80,15 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
         await page.goto(new URL(pagePath, baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 120_000 });
         await page.waitForLoadState('load', { timeout: 20_000 }).catch(() => {});
         await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-        return await page.screenshot({ type: 'jpeg', quality: 70, fullPage });
+        await acceptCookies(page);
+        if (scrollTo) {
+          // the screen around the first element showing this text (e.g. "Add to cart")
+          const target = page.getByText(scrollTo, { exact: false }).first();
+          await target.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+          await page.evaluate(() => window.scrollBy(0, -120)).catch(() => {});
+          await page.waitForTimeout(500);
+        }
+        return await page.screenshot({ type: 'jpeg', quality: 70, fullPage: fullPage && !scrollTo });
       } finally {
         await context.close().catch(() => {});
       }
@@ -111,19 +125,20 @@ export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, sh
         {
           path: z.string().describe('Page path on the store, e.g. "/en", "/ar", "/en/p/some-product", "/en/cart". Default "/en".').optional(),
           viewport: z.enum(['phone', 'desktop']).describe('Screen size').optional(),
-          fullPage: z.boolean().describe('The whole page instead of the first screen').optional(),
+          fullPage: z.boolean().describe('The whole page shrunk into one image (small: details like corners are hard to see)').optional(),
+          scrollTo: z.string().describe('Scroll to the first element showing this text and shoot that screen, e.g. "Add to cart" or a section title. Best for checking a detail.').optional(),
         },
         async (args) => {
           const pagePath = safePreviewPath(args.path ?? '/en');
           if (!pagePath) return { content: [{ type: 'text', text: 'Use a path on the store that starts with "/", e.g. "/en".' }], isError: true };
           try {
             index += 1;
-            const shot = await shoot(pool, { baseUrl: await baseUrl(), path: pagePath, viewport: args.viewport ?? 'desktop', fullPage: !!args.fullPage, saveDir, index });
+            const shot = await shoot(pool, { baseUrl: await baseUrl(), path: pagePath, viewport: args.viewport ?? 'desktop', fullPage: !!args.fullPage, scrollTo: args.scrollTo ?? null, saveDir, index });
             onShot(shot.file);
             return {
               content: [
                 { type: 'image', data: shot.data, mimeType: 'image/jpeg' },
-                { type: 'text', text: `Screenshot of ${pagePath} (${args.viewport ?? 'desktop'}).` },
+                { type: 'text', text: `Screenshot of ${pagePath} (${args.viewport ?? 'desktop'}${args.scrollTo ? `, at "${args.scrollTo}"` : ''}).` },
               ],
             };
           } catch (error) {
