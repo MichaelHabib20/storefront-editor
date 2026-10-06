@@ -107,6 +107,8 @@ export function createStores(config) {
       const stores = await read();
       if (!stores[id]) throw new StoreError('not_found', `No store copy "${id}".`);
       const cwd = workspaceOf(id);
+      // starter updates go into the approved copy only; an open draft is approved or discarded first
+      if ((await must('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd })).trim() !== branchOf(id)) return { ok: false, reason: 'draft_open', output: '' };
       const before = (await must('git', ['rev-parse', 'HEAD'], { cwd })).trim();
       const merged = await run('git', ['merge', '--no-edit', config.starterBranch], { cwd });
       if (merged.code !== 0) {

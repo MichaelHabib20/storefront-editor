@@ -26,8 +26,12 @@ export function createAiConfig(raw) {
   const defaults = validate('defaults', { ...raw.defaults });
   const stores = raw.stores ?? {};
   for (const [id, override] of Object.entries(stores)) validate(`stores.${id}`, { ...defaults, ...override });
+  const files = raw.files ?? { editable: [], locked: [], generated: [] };
 
   return {
+    /** Which files the agent may change (the same for every store). */
+    files,
+
     /** The settings in force for one store. */
     forStore(id) {
       return Object.freeze({ ...defaults, ...(stores[id] ?? {}) });

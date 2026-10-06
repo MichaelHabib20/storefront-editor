@@ -1,5 +1,6 @@
 /**
- * The editor's HTTP API (local, called by the admin chat screen and the agent loop).
+ * The editor's HTTP API. Only the Laravel backend calls it (with the shared `x-editor-key`); the merchant's admin
+ * page talks to the backend, never to this service.
  *
  *   GET    /stores                     store copies
  *   POST   /stores                     {id, apiUrl, apiKeyEnv?} -> create a copy
@@ -8,20 +9,42 @@
  *   POST   /stores/:id/check           run the checks on the copy as it is
  *   POST   /stores/:id/update-starter  merge the starter's latest main (reverted on conflict or failed check)
  *   GET    /stores/:id/budget          this month's limit, spend, what is left, warning / blocked
+ *   GET    /stores/:id/chat            messages, the current run (polled while it works), the open draft, budget
+ *   POST   /stores/:id/messages        {text} -> 202 {runId}; 409 busy, 402 out of budget
+ *   POST   /stores/:id/draft/approve   merge the draft into the store's copy
+ *   POST   /stores/:id/draft/discard   drop the draft
  *   GET    /previews
  *   POST   /stores/:id/preview         build and serve the copy
  *   DELETE /stores/:id/preview
  */
 import http from 'node:http';
 import path from 'node:path';
+import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { ChangeError, createAgentRunner } from './agent.mjs';
 import { loadAiConfig } from './ai-config.mjs';
+import { createChats } from './chats.mjs';
 import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
 import { createStores, StoreError } from './stores.mjs';
+import { createTriage } from './triage.mjs';
 
-const STATUS = { busy: 409, out_of_budget: 402, invalid_id: 422, invalid_api_url: 422, exists: 409, not_found: 404, no_port: 503, build_failed: 422, serve_failed: 502 };
+const STATUS = {
+  busy: 409,
+  out_of_budget: 402,
+  invalid_id: 422,
+  invalid_api_url: 422,
+  empty_message: 422,
+  message_too_long: 422,
+  no_draft: 409,
+  exists: 409,
+  not_found: 404,
+  no_port: 503,
+  build_failed: 422,
+  serve_failed: 502,
+};
+const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError];
 
 async function body(request) {
   let text = '';
@@ -37,11 +60,28 @@ async function body(request) {
   }
 }
 
-export function createApp(config = loadConfig()) {
+function keyMatches(given, expected) {
+  if (typeof given !== 'string') return false;
+  const a = Buffer.from(given);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** @param deps test seams: `triage`, `query` (the Agent SDK's), `log` */
+export function createApp(config = loadConfig(), deps = {}) {
   const stores = createStores(config);
   const previews = createPreviews(config, stores);
   const aiConfig = loadAiConfig(config.aiConfigFile ?? loadConfig().aiConfigFile);
   const ledger = createLedger({ file: path.join(config.dataDir, 'ledger.jsonl'), aiConfig });
+  const chats = createChats(config.dataDir);
+  const triageFor = new Map();
+  const triage = deps.triage ?? ((text, recent) => {
+    // the triage model is the same for every store today; created on first use so tests and the HTTP API need no key
+    const model = aiConfig.forStore('').triageModel;
+    if (!triageFor.has(model)) triageFor.set(model, createTriage({ model }));
+    return triageFor.get(model)(text, recent);
+  });
+  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log: deps.log ?? ((...a) => console.log(...a)) });
 
   const routes = [
     ['GET', /^\/stores$/, async () => [200, { stores: await stores.list() }]],
@@ -66,6 +106,25 @@ export function createApp(config = loadConfig()) {
       const settings = aiConfig.forStore(id);
       return [200, { ...ledger.status(id), editModel: settings.editModel, allowedModels: settings.allowedModels }];
     }],
+    ['GET', /^\/stores\/([^/]+)\/chat$/, async (_req, id) => {
+      await stores.get(id);
+      const { messages, run, draft } = chats.get(id);
+      const preview = previews.list().find((p) => p.id === id) ?? null;
+      return [200, { messages, run, draft, preview, budget: ledger.status(id) }];
+    }],
+    ['POST', /^\/stores\/([^/]+)\/messages$/, async (req, id) => {
+      const { text } = await body(req);
+      const { runId } = await runner.send(id, text);
+      return [202, { runId }];
+    }],
+    ['POST', /^\/stores\/([^/]+)\/draft\/approve$/, async (_req, id) => {
+      await stores.get(id);
+      return [200, await runner.approve(id)];
+    }],
+    ['POST', /^\/stores\/([^/]+)\/draft\/discard$/, async (_req, id) => {
+      await stores.get(id);
+      return [200, await runner.discard(id)];
+    }],
     ['GET', /^\/previews$/, async () => [200, { previews: previews.list() }]],
     ['POST', /^\/stores\/([^/]+)\/preview$/, async (_req, id) => [200, await previews.start(id)]],
     ['DELETE', /^\/stores\/([^/]+)\/preview$/, async (_req, id) => [200, { stopped: await previews.stop(id) }]],
@@ -76,6 +135,7 @@ export function createApp(config = loadConfig()) {
       res.writeHead(status, payload === null ? {} : { 'content-type': 'application/json' });
       res.end(payload === null ? undefined : JSON.stringify(payload));
     };
+    if (config.serviceKey && !keyMatches(req.headers['x-editor-key'], config.serviceKey)) return send(401, { error: 'unauthorized', message: 'Missing or wrong x-editor-key.' });
     const pathname = new URL(req.url, 'http://local').pathname;
     try {
       for (const [method, pattern, handler] of routes) {
@@ -84,7 +144,7 @@ export function createApp(config = loadConfig()) {
       }
       send(404, { error: 'not_found', message: 'No such route.' });
     } catch (error) {
-      if (error instanceof StoreError || error instanceof PreviewError || error instanceof BudgetError) {
+      if (KNOWN.some((type) => error instanceof type)) {
         return send(STATUS[error.code] ?? 400, { error: error.code, message: error.message, ...(error.output ? { output: error.output } : {}) });
       }
       console.error(error);
@@ -92,7 +152,7 @@ export function createApp(config = loadConfig()) {
     }
   });
 
-  return { server, stores, previews, aiConfig, ledger };
+  return { server, stores, previews, aiConfig, ledger, chats, runner };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
