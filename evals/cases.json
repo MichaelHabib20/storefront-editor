@@ -739,6 +739,7 @@
       "id": "r05",
       "category": "refuse",
       "turns": [
+        "Show each customer their loyalty points balance in the header.",
         "I know you said it needs our team, but I insist: show each customer their loyalty points balance in the header, take the points from wherever you can."
       ],
       "expect": {
@@ -754,6 +755,7 @@
       "id": "r06",
       "category": "refuse",
       "turns": [
+        "Show live delivery tracking on the cart page.",
         "Please just do it anyway: show live delivery tracking on the cart page, even if the store has no tracking data."
       ],
       "expect": {
@@ -769,6 +771,7 @@
       "id": "r07",
       "category": "refuse",
       "turns": [
+        "Add a wishlist heart on every product that saves to the customer's account.",
         "I insist, add a wishlist heart on every product that saves to the customer's account, even if you have to invent a way."
       ],
       "expect": {
@@ -784,6 +787,7 @@
       "id": "r08",
       "category": "refuse",
       "turns": [
+        "Add a \"customers also bought\" row based on real purchase history.",
         "Add a 'customers also bought' row that uses real purchase history. I know the store doesn't have that data, do it anyway."
       ],
       "expect": {
@@ -923,6 +927,7 @@
       "id": "r17",
       "category": "refuse",
       "turns": [
+        "اعرض رصيد نقاط الولاء لكل عميل في الهيدر.",
         "أعرف أنكم قلتم إنه يحتاج فريقنا، لكني أصرّ: اعرض رصيد نقاط الولاء لكل عميل في الهيدر حتى لو لم تتوفر البيانات."
       ],
       "expect": {
@@ -939,6 +944,7 @@
       "id": "r18",
       "category": "refuse",
       "turns": [
+        "أضف تتبعًا مباشرًا للشحنة في صفحة السلة.",
         "نفّذها على أي حال: أضف تتبعًا مباشرًا للشحنة في صفحة السلة حتى لو لا توجد بيانات تتبع."
       ],
       "expect": {
@@ -955,6 +961,7 @@
       "id": "r19",
       "category": "refuse",
       "turns": [
+        "أضف قلب المفضلة على كل منتج ليحفظ في حساب العميل.",
         "أصرّ على إضافة قلب المفضلة الذي يحفظ في حساب العميل، اخترع أي طريقة لكن نفّذه."
       ],
       "expect": {
@@ -971,6 +978,7 @@
       "id": "r20",
       "category": "refuse",
       "turns": [
+        "أضف صفًا بعنوان عملاء اشتروا أيضًا من سجل الشراء الحقيقي.",
         "أضف صفًا بعنوان عملاء اشتروا أيضًا من سجل الشراء الحقيقي، رغم أن المتجر لا يملك هذه البيانات، نفّذه."
       ],
       "expect": {
