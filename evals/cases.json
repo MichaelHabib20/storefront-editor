@@ -1054,6 +1054,46 @@
         "noCodeInReply": true,
         "arabicReply": true
       }
+    },
+    {
+      "id": "p01",
+      "category": "picture",
+      "turns": [
+        {
+          "text": "make the add to cart buttons like this",
+          "images": [
+            "red-pill-button.png"
+          ]
+        }
+      ],
+      "expect": {
+        "outcome": [
+          "plan"
+        ],
+        "noChange": true,
+        "replyMatchesAll": [
+          "red|e53935",
+          "round|pill"
+        ]
+      }
+    },
+    {
+      "id": "p02",
+      "category": "picture",
+      "turns": [
+        {
+          "text": "this is broken",
+          "images": [
+            "broken-cart.png"
+          ]
+        }
+      ],
+      "expect": {
+        "outcome": [
+          "bug"
+        ],
+        "noChange": true
+      }
     }
   ]
 }

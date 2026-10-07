@@ -16,6 +16,7 @@ import { PreviewError } from './preview.mjs';
 import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
 import { must, run } from './run.mjs';
 import { BudgetError } from './ledger.mjs';
+import { checkImages, loadImages, promptWithImages, saveImages } from './images.mjs';
 import { MAIN_CHAT, NEW_CHAT_TITLE, cleanTitle } from './chats.mjs';
 
 const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
@@ -107,13 +108,13 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
   }
 
   /** One Agent SDK call; returns the final message and what it cost beyond what the session had already spent. */
-  async function agentTurn(storeId, chatId, { prompt, model, settings, maxBudgetUsd, cwd, eyes = null }) {
+  async function agentTurn(storeId, chatId, { prompt, images = [], model, settings, maxBudgetUsd, cwd, eyes = null }) {
     const chat = chats.get(storeId, chatId);
     // a turn that hangs (a stuck tool, a stuck preview) ends instead of holding the store forever
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), config.turnTimeoutMs ?? 10 * 60_000);
     const stream = query({
-      prompt,
+      prompt: promptWithImages(prompt, images),
       options: {
         abortController: abort,
         cwd,
@@ -220,7 +221,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
   /** The owner's language for the few fixed sentences the editor says itself. */
   const said = (ownerText, en, ar) => (/[؀-ۿ]/.test(ownerText) ? ar : en);
 
-  async function work(storeId, chatId, runId, text, reservation, light) {
+  async function work(storeId, chatId, runId, text, reservation, light, images = [], savedRefs = []) {
     const settings = aiConfig.forStore(storeId);
     const cwd = stores.workspaceOf(storeId);
     const charges = [];
@@ -240,26 +241,32 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
 
     try {
       const pending = chats.get(storeId, chatId).pending ?? null;
-      const decision = await triage(text, chats.recent(storeId, chatId), { pending });
+      const decision = await triage(text, chats.recent(storeId, chatId), { pending, images });
       charge({ kind: 'triage', model: decision.model, costUsd: decision.costUsd, usage: decision.usage });
       const title = cleanTitle(decision.title);
       if (title && chats.get(storeId, chatId).title === NEW_CHAT_TITLE) chats.rename(storeId, chatId, title);
 
       // what gets built: a clear request now, or the plan the owner just accepted
+      const pendingRefs = decision.decision === 'go_ahead' ? [...(pending?.images ?? []), ...savedRefs].slice(0, 3) : savedRefs;
       let job = null;
       let ack = null;
       if (decision.decision === 'go_ahead' && pending) {
-        job = { task: pending.task, large: pending.large, shared: !!pending.shared };
+        job = { task: pending.task, large: pending.large, shared: !!pending.shared, images: [...loadImages(config.dataDir, storeId, chatId, pending.images), ...images].slice(0, 3) };
         ack = decision.reply || 'On it.';
       } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
         // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
-        setPending(storeId, chatId, { task: decision.task, large: decision.large, shared: !!decision.shared });
+        setPending(storeId, chatId, { task: decision.task, large: decision.large, shared: !!decision.shared, images: savedRefs });
         chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'plan', options: cleanOptions(decision.options) });
         outcome = 'plan';
         return;
       } else if (decision.decision === 'edit') {
-        job = { task: decision.task, large: decision.large, shared: !!decision.shared };
+        job = { task: decision.task, large: decision.large, shared: !!decision.shared, images };
         ack = decision.reply;
+      } else if (decision.decision === 'bug') {
+        // looking into bugs comes with the Fix a bug mode; until then the owner is asked for the details
+        chats.say(storeId, chatId, 'assistant', decision.reply, { runId });
+        outcome = 'bug';
+        return;
       } else if (decision.decision === 'refuse') {
         const refuseKind = ['business_logic', 'needs_backend', 'unsafe'].includes(decision.refuseKind) ? decision.refuseKind : 'unsafe';
         chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'refusal', card: { refuseKind } });
@@ -287,7 +294,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           if (!(error instanceof BudgetError) || error.code !== 'busy') throw error;
           const other = chats.state.get(storeId).run;
           const otherTitle = other ? chats.get(storeId, other.chatId).title : '';
-          setPending(storeId, chatId, job);
+          setPending(storeId, chatId, { task: job.task, large: job.large, shared: job.shared, images: pendingRefs });
           chats.say(
             storeId,
             chatId,
@@ -312,8 +319,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       phase('editing', 'Changing files', { model });
 
       // the editing AI gets the job triage resolved plus the conversation, not just the owner's last few words
-      const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, chatId, 12), shared: job.shared });
-      let turn = await agentTurn(storeId, chatId, { prompt, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
+      const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, chatId, 12), shared: job.shared, pictures: job.images.length });
+      let turn = await agentTurn(storeId, chatId, { prompt, images: job.images, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
       charge(turn.charge, true);
 
       for (let round = 0; ; round++) {
@@ -334,7 +341,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         if (sharedTouched.length) {
           setRun(storeId, { lastFailure: { round, step: 'shared parts changed', output: sharedTouched.join('\n') } });
           await resetWorkspace(cwd);
-          setPending(storeId, chatId, { task: job.task, large: job.large, shared: true });
+          setPending(storeId, chatId, { task: job.task, large: job.large, shared: true, images: pendingRefs });
           const question = askShared(text);
           chats.say(storeId, chatId, 'assistant', question.text, { runId, kind: 'plan', options: question.options });
           outcome = 'needs_confirmation';
@@ -428,11 +435,12 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
      * `out_of_budget` before anything starts. While another chat holds the store's build, the message still gets
      * an answer (a question, a plan); a build waits and the chat says which chat is building.
      */
-    async send(storeId, text, { chatId = MAIN_CHAT } = {}) {
+    async send(storeId, text, { chatId = MAIN_CHAT, images: rawImages } = {}) {
       await stores.get(storeId);
       undoGuard(storeId);
       if (typeof text !== 'string' || !text.trim()) throw new ChangeError('empty_message', 'The message is empty.');
       if (text.length > 4000) throw new ChangeError('message_too_long', 'The message is too long.');
+      const images = checkImages(rawImages);
       const chat = chats.get(storeId, chatId);
       if (chat.lightRun && chat.lightRun.state !== 'done') throw new ChangeError('busy', 'This chat is still working on your last message.');
       const building = chats.state.get(storeId).run;
@@ -448,7 +456,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         light = true;
       }
       const runId = randomUUID();
-      chats.say(storeId, chatId, 'merchant', text.trim(), { runId });
+      const savedRefs = saveImages(config.dataDir, storeId, chatId, runId, images);
+      chats.say(storeId, chatId, 'merchant', text.trim(), { runId, ...(savedRefs.length ? { images: savedRefs } : {}) });
       const startedAt = new Date().toISOString();
       if (light) {
         chats.update(storeId, chatId, (c) => {
@@ -462,7 +471,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           state.run = { id: runId, chatId, state: 'triage', startedAt, outcome: null, round: 0, steps: [{ at: startedAt, kind: 'phase', text: 'Reading your request' }], updatedAt: startedAt };
         });
       }
-      const done = work(storeId, chatId, runId, text.trim(), reservation, light);
+      const done = work(storeId, chatId, runId, text.trim(), reservation, light, images, savedRefs);
       return { runId, done };
     },
 

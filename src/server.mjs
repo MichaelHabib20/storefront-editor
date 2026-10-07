@@ -33,6 +33,7 @@ import { pathToFileURL } from 'node:url';
 import { ChangeError, createAgentRunner } from './agent.mjs';
 import { loadAiConfig } from './ai-config.mjs';
 import { ChatError, MAIN_CHAT, createChats } from './chats.mjs';
+import { ImageError, readImage } from './images.mjs';
 import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
@@ -65,15 +66,36 @@ const STATUS = {
   chat_busy: 409,
   busy_other_chat: 409,
   invalid_title: 422,
+  too_many_images: 422,
+  image_too_large: 422,
+  image_type: 422,
+  image_invalid: 422,
 };
-const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError, PublishError, ChatError];
+const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError, PublishError, ChatError, ImageError];
 
-async function body(request) {
+/** A message with pictures is bigger: 3 pictures of 2 MB are about 8,000,000 characters of base64. */
+const PICTURE_BODY_LIMIT = 12_000_000;
+
+async function body(request, limit = 1_000_000) {
   let text = '';
+  let seen = 0;
+  let tooLarge = false;
   for await (const chunk of request) {
+    seen += chunk.length;
+    // a body over the limit is read to its end and thrown away (answering early can wedge the connection), but
+    // never without end
+    if (seen > limit * 4) {
+      request.destroy();
+      throw new StoreError('too_large', 'Body too large.');
+    }
+    if (tooLarge) continue;
     text += chunk;
-    if (text.length > 1_000_000) throw new StoreError('too_large', 'Body too large.');
+    if (text.length > limit) {
+      tooLarge = true;
+      text = '';
+    }
   }
+  if (tooLarge) throw new StoreError('too_large', 'Body too large.');
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -97,12 +119,12 @@ export function createApp(config = loadConfig(), deps = {}) {
   const ledger = createLedger({ file: path.join(config.dataDir, 'ledger.jsonl'), aiConfig });
   const chats = createChats(config.dataDir);
   const triageFor = new Map();
-  const triage = deps.triage ?? ((text, recent) => {
+  const triage = deps.triage ?? ((text, recent, context) => {
     // the triage model is the same for every store today; created on first use so tests and the HTTP API need no key
     const model = aiConfig.forStore('').triageModel;
     // with no API key (local testing), triage goes through the Agent SDK and this machine's Claude Code login
     if (!triageFor.has(model)) triageFor.set(model, process.env.ANTHROPIC_API_KEY ? createTriage({ model }) : createSdkTriage({ query: deps.query ?? sdkQuery, model }));
-    return triageFor.get(model)(text, recent);
+    return triageFor.get(model)(text, recent, context);
   });
   const browsers = deps.browsers === undefined ? createBrowserPool() : deps.browsers;
   const log = deps.log ?? ((...a) => console.log(...a));
@@ -176,9 +198,16 @@ export function createApp(config = loadConfig(), deps = {}) {
       await stores.get(id);
       return [200, await view(id, chatId)];
     }],
+    ['GET', /^\/stores\/([^/]+)\/chats\/([^/]+)\/images\/([^/]+)$/, async (_req, id, chatId, file) => {
+      await stores.get(id);
+      chats.get(id, chatId);
+      const image = readImage(config.dataDir, id, chatId, file);
+      if (!image) throw new ChatError('not_found', 'No such picture.');
+      return [200, image.bytes, image.mediaType];
+    }],
     ['POST', /^\/stores\/([^/]+)\/chats\/([^/]+)\/messages$/, async (req, id, chatId) => {
-      const { text, command, url, selection } = await body(req);
-      const { runId } = await runner.send(id, text, { chatId, command, url, selection });
+      const { text, images, command, url, selection } = await body(req, PICTURE_BODY_LIMIT);
+      const { runId } = await runner.send(id, text, { chatId, images, command, url, selection });
       return [202, { runId }];
     }],
     ['POST', /^\/stores\/([^/]+)\/messages$/, async (req, id) => {
@@ -274,7 +303,11 @@ export function createApp(config = loadConfig(), deps = {}) {
   }
 
   const server = http.createServer(async (req, res) => {
-    const send = (status, payload) => {
+    const send = (status, payload, binaryType = null) => {
+      if (Buffer.isBuffer(payload)) {
+        res.writeHead(status, { 'content-type': binaryType, 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=3600' });
+        return res.end(payload);
+      }
       res.writeHead(status, payload === null ? {} : { 'content-type': 'application/json' });
       res.end(payload === null ? undefined : JSON.stringify(payload));
     };

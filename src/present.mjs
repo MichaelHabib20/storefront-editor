@@ -23,7 +23,7 @@ function cardOf(kind, card) {
   return null;
 }
 
-function messageOf(m) {
+function messageOf(m, chatId) {
   const kind = KINDS.includes(m.kind) ? m.kind : 'text';
   const card = cardOf(kind, m.card);
   return {
@@ -36,7 +36,7 @@ function messageOf(m) {
     options: options(m.options),
     kind,
     ...(card ? { card } : {}),
-    images: [],
+    images: (Array.isArray(m.images) ? m.images : []).slice(0, 3).filter((i) => typeof i?.file === 'string').map((i) => ({ id: i.file, url: `chats/${chatId}/images/${i.file}` })),
   };
 }
 
@@ -56,7 +56,7 @@ export function presentChat(chat, { state = {}, titleOf = () => '', preview = nu
   return {
     ready: true,
     chat: { id: chat.id, title: String(chat.title ?? '') },
-    messages: (chat.messages ?? []).filter((m) => ROLES.includes(m.role)).map(messageOf),
+    messages: (chat.messages ?? []).filter((m) => ROLES.includes(m.role)).map((m) => messageOf(m, chat.id)),
     working: status !== null && status !== 'done',
     run: mine ? { id: String(mine.id ?? ''), state: status, startedAt: mine.startedAt ?? null, chatId: chat.id, here: true, steps: here ? steps(mine.steps) : [] } : null,
     otherChatBuilding: otherBuilding ? { chatId: otherBuilding, title: titleOf(otherBuilding) } : null,

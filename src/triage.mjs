@@ -5,9 +5,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
+import { contentWithImages, promptWithImages } from './images.mjs';
 
 const Decision = z.object({
-  decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope', 'refuse']),
+  decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope', 'refuse', 'bug']),
   /** For "refuse": why. "none" for every other decision. */
   refuseKind: z.enum(['none', 'business_logic', 'needs_backend', 'unsafe']),
   /** A short title for this chat (max 40 characters, in the owner's language). */
@@ -102,6 +103,10 @@ Decide one of:
   A plain question like "change the price of X to 50" is still "admin_setting"; "needs_backend" stays the decision
   for a first request for missing data; "out_of_scope" stays for general chat, asking for the code or files, and
   asking to change somebody else's website (a competitor's store). Use "refuse" only for the cases above.
+- "bug": the owner reports something that is broken or not working on their store (a button missing, a page that
+  errors, a wrong layout on a phone), in words or with a screenshot of the problem ("this is broken" + a picture of
+  a page with the problem). Do not decide "edit" for these: a bug is looked at first. "reply": one short sentence
+  saying you will look into it (in the owner's language).
 - "out_of_scope": anything else (asking for the code, files, secrets, other stores, general chat). When they ask for
   the code, files or secrets: say kindly that the AI Designer does not share code or files, and offer to change how
   the store looks instead. Never suggest another place or person to get the code from.
@@ -126,6 +131,14 @@ category tiles on the home page"), even if a site-wide change could also do it.
 - "unclear": 2-4 concrete choices that answer your question (e.g. "Product cards", "Product page", "Both").
 - "edit" with "confirm": true: "Yes, go ahead" plus 1-2 alternatives when there is an obvious one.
 - otherwise: [].
+Pictures: the owner may attach up to 3 pictures. Look at them before deciding.
+- A picture that shows how they WANT something to look (a button, a header, a colour scheme) belongs to an "edit".
+  Describe what you see in "task" and in the plan "reply": the colours (name them and give the hex when clear), the
+  shape (rounded, pill, square), the text style. Never say you cannot see the picture.
+  Because a picture is open to interpretation, set "confirm": true: the plan "reply" says what you see in the picture
+  (colours, shape) and what you will change, ending with a short "Shall I go ahead?".
+- A picture that shows something WRONG (a screenshot of a page with a problem, a box drawn around a broken part) is a
+  "bug", not an "edit".
 Language: write "reply" and "options" in the language of the owner's LATEST message (English if it is English, Arabic if
 it is Arabic), even if earlier messages were in another language.
 "title": a short title for this conversation (at most 40 characters, in the language of the owner's message), such as
@@ -135,10 +148,10 @@ and friendly, in the language they wrote in; for "admin_setting" say where in th
 
 const FALLBACK = { decision: 'unclear', refuseKind: 'none', title: '', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
 
-const promptFor = (text, recent, { pending = null } = {}) =>
+const promptFor = (text, recent, { pending = null, images = [] } = {}) =>
   `${recent.length ? `Recent conversation:\n${recent.map((m) => `${m.role}: ${m.text}`).join('\n')}\n\n` : ''}${
     pending ? `Plan waiting for the owner's OK: ${pending.task}\n\n` : 'No plan is waiting for the owner\'s OK.\n\n'
-  }New message from the owner:\n${text}`;
+  }New message from the owner${images.length ? ` (with ${images.length} attached picture${images.length > 1 ? 's' : ''})` : ''}:\n${text}`;
 
 /**
  * Triage through the Agent SDK instead of the API client: no tools, one structured answer. It uses whatever
@@ -148,7 +161,7 @@ export function createSdkTriage({ query, model }) {
   return async function triage(text, recent = [], context = {}) {
     let result = null;
     for await (const message of query({
-      prompt: promptFor(text, recent, context),
+      prompt: promptWithImages(promptFor(text, recent, context), context.images),
       options: {
         model,
         systemPrompt: SYSTEM,
@@ -173,7 +186,7 @@ export function createTriage({ client = new Anthropic(), model }) {
       model,
       max_tokens: 1024,
       system: SYSTEM,
-      messages: [{ role: 'user', content: promptFor(text, recent, context) }],
+      messages: [{ role: 'user', content: contentWithImages(promptFor(text, recent, context), context.images) }],
       output_config: { format: zodOutputFormat(Decision) },
     });
     const parsed = response.parsed_output ?? FALLBACK;

@@ -61,7 +61,7 @@ export function systemPrompt(workspace, { eyes = false } = {}) {
  * What the editing AI is asked to do: the job as triage resolved it from the whole conversation, the conversation
  * itself (including the turns triage answered, which the editing AI never saw), and the owner's latest words.
  */
-export function taskPrompt({ task, latest, recent = [], shared = false }) {
+export function taskPrompt({ task, latest, recent = [], shared = false, pictures = 0 }) {
   const who = { merchant: 'Owner', assistant: 'AI Designer', system: 'Page' };
   const conversation = recent.length ? recent.map((m) => `${who[m.role] ?? 'AI Designer'}: ${m.text}`).join('\n') : '(none)';
   return `The owner's request, as understood from the whole conversation:
@@ -73,7 +73,9 @@ The conversation so far (most recent last):
 ${conversation}
 
 The owner's latest message: ${latest}
-
+${pictures ? `
+The owner attached ${pictures} picture${pictures > 1 ? 's' : ''} to this request (shown before this text). Use ${pictures > 1 ? 'them' : 'it'} as the reference for how the result should look. Never copy a brand's logo or text from a picture.
+` : ''}
 Do exactly the request above, on the element it names. If it is still unclear which element or where, ask one short
 question instead of changing anything.`;
 }

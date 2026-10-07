@@ -157,13 +157,16 @@ for (const testCase of todo) {
   const turns = [];
   try {
     await reset();
-    for (const raw of testCase.turns) {
+    for (const entry of testCase.turns) {
+      // a turn is a text, or { text, images: [file names in evals/images] }
+      const raw = typeof entry === 'string' ? entry : entry.text;
       // a scripted answer ("{yes}", "{option:...}") is only given while the AI is still asking
       if (raw.startsWith('{') && outcomes.at(-1) === 'preview') break;
       const text = resolveTurn(raw);
       if (text === null) continue; // the AI did not offer that choice: it did not ask that question
       turns.push(text);
-      const { done } = await app.runner.send(STORE, text);
+      const images = (entry.images ?? []).map((file) => ({ mediaType: 'image/png', data: fs.readFileSync(path.join(root, 'evals', 'images', file)).toString('base64') }));
+      const { done } = await app.runner.send(STORE, text, { images });
       await done;
       outcomes.push(app.chats.state.get(STORE).run?.outcome ?? 'none');
     }
