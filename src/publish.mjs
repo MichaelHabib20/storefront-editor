@@ -94,7 +94,15 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
       const result = await run(deployCommand, deployArgs, { cwd: siteDir, timeoutMs: config.deployTimeoutMs });
       entry.deploymentUrl = deploymentUrlFrom(result.output, siteUrl);
       entry.ok = result.code === 0;
-      if (!entry.ok) entry.error = result.output.slice(-4000);
+      if (!entry.ok && entry.deploymentUrl) {
+        // the deploy command can lose its connection while the host goes on building: ask the host how it ended
+        const [inspectCommand, inspectArgs] = config.inspect ?? ['vercel', ['inspect', '{url}', '--wait']];
+        const inspected = await run(inspectCommand, inspectArgs.map((a) => (a === '{url}' ? entry.deploymentUrl : a)), { cwd: siteDir, timeoutMs: config.deployTimeoutMs });
+        entry.ok = inspected.code === 0 && /status\s+\S*\s*Ready\b/i.test(inspected.output);
+        if (!entry.ok) entry.error = `${result.output.slice(-3000)}\n--- inspect ---\n${inspected.output.slice(-1000)}`;
+      } else if (!entry.ok) {
+        entry.error = result.output.slice(-4000);
+      }
     } catch (error) {
       entry.error = String(error.message ?? error).slice(-4000);
     }

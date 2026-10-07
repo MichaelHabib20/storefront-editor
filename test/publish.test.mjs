@@ -58,12 +58,16 @@ before(async () => {
     [
       "import fs from 'node:fs';",
       "if (fs.existsSync('.vercel/FAIL')) { console.error('Error: build failed'); process.exit(1); }",
+      "if (fs.existsSync('.vercel/DROP')) { console.log('Deployment acme-shop-dropped-team.vercel.app building'); console.error('Error: read ECONNRESET'); process.exit(1); }",
       "const files = fs.readdirSync('.', { recursive: true }).filter((f) => !String(f).startsWith('.vercel')).map(String).sort();",
       "fs.appendFileSync('.vercel/deploys.log', JSON.stringify({ files, page: fs.existsSync('src/page.txt') ? fs.readFileSync('src/page.txt', 'utf8') : null }) + '\\n');",
       "console.log('Deployment acme-shop-' + Date.now().toString(36) + '-team.vercel.app ready.');",
       "console.log('Aliased https://acme-shop.vercel.app');",
     ].join('\n'),
   );
+  // the host's answer for a deployment the deploy command lost track of: Ready unless `.vercel/BUILD_FAILED` exists
+  const inspectScript = path.join(dir, 'fake-inspect.mjs');
+  await write(dir, 'fake-inspect.mjs', "import fs from 'node:fs'; console.log('  status\\t● ' + (fs.existsSync('.vercel/BUILD_FAILED') ? 'Error' : 'Ready'));\n");
   const aiConfigFile = path.join(dir, 'ai.json');
   await fs.writeFile(aiConfigFile, JSON.stringify({ defaults: { editModel: 'claude-sonnet-5-5', triageModel: 'claude-haiku-4-5', allowedModels: ['claude-sonnet-5-5'], routing: 'auto', effort: 'medium', monthlyLimitUsd: 5, perRequestMaxUsd: 1, minToStartUsd: 0.05, warnAt: 0.8, maxTurns: 10, maxFixRounds: 1 }, files: { editable: ['src/**'], locked: [], generated: [], shared: [] } }));
 
@@ -75,6 +79,7 @@ before(async () => {
       dataDir: path.join(dir, 'data'),
       checks: [],
       deploy: ['node', [deployScript]],
+      inspect: ['node', [inspectScript, '{url}']],
       deployTimeoutMs: 30_000,
       previewPorts: [3481, 3490],
       aiConfigFile,
@@ -197,6 +202,22 @@ test('a starter update that was undone can be brought in again', async () => {
 
   assert.equal((await call('POST', '/stores/acme/update-starter')).body.reason, 'updated');
   assert.equal(await read(path.join(workspace, 'src', 'starter-news.txt')), 'new in the starter');
+});
+
+test('a deploy command that loses its connection is judged by how the host build ended', async () => {
+  await write(site, '.vercel/DROP', '1');
+  await write(site, '.vercel/BUILD_FAILED', '1');
+  await call('POST', '/stores/acme/publish');
+  let chat = await settled();
+  assert.equal(chat.publish.lastFailed, true, 'the host build failed too');
+
+  await fs.rm(path.join(site, '.vercel', 'BUILD_FAILED'));
+  await call('POST', '/stores/acme/publish');
+  chat = await settled();
+  await fs.rm(path.join(site, '.vercel', 'DROP'));
+  assert.equal(chat.publish.lastFailed, false, 'the host finished the build: the site did change');
+  assert.equal(chat.publish.unpublished, false);
+  assert.match(chat.messages.at(-1).text, /^Published\./);
 });
 
 test('the deployment address is read from the deploy output', () => {
