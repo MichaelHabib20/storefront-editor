@@ -14,7 +14,7 @@ const VIEWPORTS = {
   desktop: { width: 1366, height: 900, isMobile: false, deviceScaleFactor: 1 },
 };
 
-/** A path on the preview: "/", "/en", "/en/p/slug?x=1". Never another host. */
+/** A path on the preview: "/", "/en", "/en/some-product?x=1". Never another host. */
 export function safePreviewPath(value) {
   const p = typeof value === 'string' && value.trim() ? value.trim() : '/';
   if (!p.startsWith('/') || p.startsWith('//') || /[\s\\]/.test(p)) return null;
@@ -123,7 +123,7 @@ export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, sh
         'screenshot',
         'Look at a page of the store preview as the owner will see it. Use it before changing anything and again after your change (both phone and desktop when the layout matters). Only say things about the result that you have seen.',
         {
-          path: z.string().describe('Page path on the store, e.g. "/en", "/ar", "/en/p/some-product", "/en/cart". Default "/en".').optional(),
+          path: z.string().describe('Page path on the store, e.g. "/en", "/ar", "/en/some-product" (a product), "/en/product/skin-care" (a category), "/en/cart". Default "/en".').optional(),
           viewport: z.enum(['phone', 'desktop']).describe('Screen size').optional(),
           fullPage: z.boolean().describe('The whole page shrunk into one image (small: details like corners are hard to see)').optional(),
           scrollTo: z.string().describe('Scroll to the first element showing this text and shoot that screen, e.g. "Add to cart" or a section title. Best for checking a detail.').optional(),
