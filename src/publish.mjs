@@ -10,8 +10,9 @@
  *      only when the build succeeded, so a failed publish leaves the live site as it was;
  *   3. records the publish in the store's chat (`chat.publish`), which the admin page polls / streams.
  *
- * Undo puts the store's branch back to the version of the publish before the last one (one new commit, so the
- * history stays) and publishes that. Code and website stay the same; it works on any hosting plan.
+ * Undo moves the store's branch back to the commit of the publish before the last one and publishes that, so code
+ * and website stay the same on any hosting plan. The branch is moved (not a revert commit) so a starter update that
+ * was undone can be brought in again later; the commits it leaves are kept under `refs/undone/<store>/<id>`.
  */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -148,10 +149,9 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
         const before = (await git(['rev-parse', 'HEAD'], cwd)).trim();
         let entry;
         try {
-          // the tree of the earlier version, as a new commit on top (files added since are removed too)
-          await git(['restore', `--source=${target.commit}`, '--staged', '--worktree', '--', '.'], cwd);
-          const changed = (await git(['status', '--porcelain'], cwd)).trim() !== '';
-          if (changed) await git(['commit', '-q', '-m', `Undo the last publish: back to the version published ${target.at.slice(0, 10)}`], cwd);
+          // keep what is left behind, then move the branch (and the workspace) to the earlier version
+          await git(['update-ref', `refs/undone/${storeId}/${last.id}`, before], cwd);
+          await git(['reset', '-q', '--hard', target.liveCommit ?? target.commit], cwd);
           const commit = (await git(['rev-parse', 'HEAD'], cwd)).trim();
           entry = await deploy(storeId, { kind: 'undo', commit, siteDir: dir, siteUrl, undoes: last.id });
           if (!entry.ok) await git(['reset', '-q', '--hard', before], cwd);

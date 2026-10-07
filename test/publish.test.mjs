@@ -150,8 +150,10 @@ test('a failed build leaves the live version and says so', async () => {
 });
 
 test('undo puts the code and the website back to the version published before', async () => {
+  const firstLive = (await git(['rev-parse', 'HEAD~1'], workspace)).trim(); // the first publish, before the broken change
   await approveChange('src/page.txt', 'v2');
   await approveChange('src/extra.txt', 'added in v2');
+  const undoneHead = (await git(['rev-parse', 'HEAD'], workspace)).trim();
   await call('POST', '/stores/acme/publish');
   let chat = await settled();
   assert.equal(chat.publish.lastFailed, false);
@@ -170,12 +172,31 @@ test('undo puts the code and the website back to the version published before', 
 
   assert.equal(await read(path.join(workspace, 'src', 'page.txt')), 'v1');
   await assert.rejects(fs.access(path.join(workspace, 'src', 'extra.txt')), 'files added since are removed');
-  assert.match(await git(['log', '-1', '--format=%s'], workspace), /^Undo the last publish/);
+  assert.equal((await git(['rev-parse', 'HEAD'], workspace)).trim(), firstLive, 'the branch is back at the earlier version');
+  assert.equal((await git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace)).trim(), 'store/acme');
+  const kept = (await git(['for-each-ref', '--format=%(objectname)', 'refs/undone/acme'], workspace)).trim();
+  assert.equal(kept, undoneHead, 'the undone commits are kept');
   const deploys = (await read(path.join(site, '.vercel', 'deploys.log'))).trim().split('\n').map((l) => JSON.parse(l));
   assert.equal(deploys.at(-1).page, 'v1');
   assert.equal(chat.publish.unpublished, false, 'the undo commit is what is live');
   assert.equal(chat.publish.canUndo, false, 'only one earlier version existed');
   assert.equal((await call('POST', '/stores/acme/publish/undo')).body.error, 'nothing_to_undo');
+});
+
+test('a starter update that was undone can be brought in again', async () => {
+  await write(starter, 'src/starter-news.txt', 'new in the starter');
+  await git(['add', '.']);
+  await git(['commit', '-q', '-m', 'starter news']);
+  assert.equal((await call('POST', '/stores/acme/update-starter')).body.reason, 'updated');
+  await call('POST', '/stores/acme/publish');
+  assert.equal((await settled()).publish.canUndo, true);
+
+  await call('POST', '/stores/acme/publish/undo');
+  await settled();
+  await assert.rejects(fs.access(path.join(workspace, 'src', 'starter-news.txt')));
+
+  assert.equal((await call('POST', '/stores/acme/update-starter')).body.reason, 'updated');
+  assert.equal(await read(path.join(workspace, 'src', 'starter-news.txt')), 'new in the starter');
 });
 
 test('the deployment address is read from the deploy output', () => {
