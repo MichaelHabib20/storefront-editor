@@ -47,6 +47,12 @@ export function loadConfig(env = process.env) {
      * (e.g. {"3301":"https://x.trycloudflare.com"}); default http://localhost:<port>.
      */
     previewPublicUrls: JSON.parse(env.EDITOR_PREVIEW_PUBLIC_URLS ?? '{}'),
+    /**
+     * Publishing (src/publish.mjs): the command run in a store's publish folder, which is already linked to its
+     * hosting project. The host switches the site over only when its build succeeded.
+     */
+    deploy: JSON.parse(env.EDITOR_DEPLOY ?? 'null') ?? ['vercel', ['deploy', '--prod', '--yes']],
+    deployTimeoutMs: Number(env.EDITOR_DEPLOY_TIMEOUT_MS ?? 15 * 60_000),
     /** Ports previews are served on. */
     previewPorts: [Number(env.EDITOR_PREVIEW_PORT_FROM ?? 3301), Number(env.EDITOR_PREVIEW_PORT_TO ?? 3399)],
     /** Models and spending limits (static for now, agent design §6). */

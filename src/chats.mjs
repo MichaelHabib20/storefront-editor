@@ -11,7 +11,8 @@ import { EventEmitter } from 'node:events';
 function systemNote(text) {
   if (/^Discarded/i.test(text)) return '[The owner pressed Discard: every change not yet approved was thrown away; the store is back to its last approved look.]';
   if (/^Approved/i.test(text)) return '[The owner pressed Approve: the changes so far are kept.]';
-  return `[${text}]`;
+  if (/^Published/i.test(text)) return '[The owner pressed Publish: every approved change is live on the website now.]';
+  if (/^Undid the last publish/i.test(text)) return '[The owner pressed Undo last publish: the website and the approved copy are back to the earlier version; the changes of that publish are gone.]';  return `[${text}]`;
 }
 
 export function createChats(dataDir) {

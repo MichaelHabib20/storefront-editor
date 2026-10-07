@@ -68,7 +68,9 @@ Where the owner is (facts; answer from them, never send the owner to someone els
 - After each change, the preview of their store appears on the right side of this page, and an "Open the preview"
   link appears under the AI's reply (it opens the preview in a new tab, also on a phone).
 - Changes are only in the preview until the owner presses "Approve" at the top of this page; "Discard" drops them.
-  Nothing reaches the live store before that.
+- Approved changes reach the live website only when the owner presses "Publish" at the top of this page (it takes a
+  few minutes; the "Live site" link there opens the website). "Undo last publish" puts the website and the approved
+  copy back to the version published before. The AI never publishes or undoes by itself: only the owner's buttons do.
 - The bar at the top shows how much of this month's AI Designer allowance is used.
 
 Decide one of:

@@ -336,6 +336,11 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     }
   }
 
+  /** An undo rewrites the store's branch in the workspace: nothing else may touch it meanwhile. */
+  function undoGuard(storeId) {
+    if (chats.get(storeId).publish?.state === 'undoing') throw new ChangeError('busy', 'The website is being put back to its earlier version. Please wait.');
+  }
+
   return {
     /**
      * Starts a run for a merchant message and returns at once (the admin page polls the chat). Throws `busy` or
@@ -343,6 +348,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
      */
     async send(storeId, text) {
       await stores.get(storeId);
+      undoGuard(storeId);
       if (typeof text !== 'string' || !text.trim()) throw new ChangeError('empty_message', 'The message is empty.');
       if (text.length > 4000) throw new ChangeError('message_too_long', 'The message is too long.');
       const reservation = ledger.reserve(storeId);
@@ -359,6 +365,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     /** Merges the draft into the store's branch (publishing it comes with step 5). */
     async approve(storeId) {
       if (ledger.status(storeId).busy) throw new ChangeError('busy', 'A change is still running.');
+      undoGuard(storeId);
       const cwd = stores.workspaceOf(storeId);
       const draft = draftOf(storeId);
       if (!(await branchExists(cwd, draft))) throw new ChangeError('no_draft', 'There is nothing to approve.');
@@ -377,6 +384,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     /** Drops the draft; the store's copy is back to its last approved state. */
     async discard(storeId) {
       if (ledger.status(storeId).busy) throw new ChangeError('busy', 'A change is still running.');
+      undoGuard(storeId);
       const cwd = stores.workspaceOf(storeId);
       const draft = draftOf(storeId);
       if (!(await branchExists(cwd, draft))) throw new ChangeError('no_draft', 'There is nothing to discard.');

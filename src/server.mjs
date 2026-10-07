@@ -14,6 +14,8 @@
  *   POST   /stores/:id/messages        {text} -> 202 {runId}; 409 busy, 402 out of budget
  *   POST   /stores/:id/draft/approve   merge the draft into the store's copy
  *   POST   /stores/:id/draft/discard   drop the draft
+ *   POST   /stores/:id/publish         put the approved copy on the store's website -> 202 (polled in the chat)
+ *   POST   /stores/:id/publish/undo    back to the version published before the last one -> 202
  *   GET    /previews
  *   POST   /stores/:id/preview         build and serve the copy
  *   DELETE /stores/:id/preview
@@ -29,6 +31,7 @@ import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
 import { presentChat } from './present.mjs';
+import { createPublisher, PublishError } from './publish.mjs';
 import { createBrowserPool } from './screenshot.mjs';
 import { verifyTicket } from './tickets.mjs';
 import { createStores, StoreError } from './stores.mjs';
@@ -48,8 +51,13 @@ const STATUS = {
   no_port: 503,
   build_failed: 422,
   serve_failed: 502,
+  not_set_up: 409,
+  publishing: 409,
+  nothing_to_publish: 409,
+  nothing_to_undo: 409,
+  draft_open: 409,
 };
-const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError];
+const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError, PublishError];
 
 async function body(request) {
   let text = '';
@@ -88,7 +96,17 @@ export function createApp(config = loadConfig(), deps = {}) {
     return triageFor.get(model)(text, recent);
   });
   const browsers = deps.browsers === undefined ? createBrowserPool() : deps.browsers;
-  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, browsers, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log: deps.log ?? ((...a) => console.log(...a)) });
+  const log = deps.log ?? ((...a) => console.log(...a));
+  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, browsers, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log });
+  const publisher = createPublisher({ config, stores, chats, isBusy: (id) => ledger.status(id).busy, log });
+
+  /** The publish part of the chat view (null when the store has no website to publish to). */
+  async function publishView(id, chat) {
+    const store = await stores.get(id);
+    if (!store.publish?.siteUrl) return null;
+    const approvedCommit = await publisher.branchHead(id).catch(() => null);
+    return publisher.view(chat, { siteUrl: store.publish.siteUrl, approvedCommit });
+  }
 
   const routes = [
     ['GET', /^\/stores$/, async () => [200, { stores: await stores.list() }]],
@@ -115,9 +133,10 @@ export function createApp(config = loadConfig(), deps = {}) {
     }],
     ['GET', /^\/stores\/([^/]+)\/chat$/, async (_req, id) => {
       await stores.get(id);
-      const { messages, run, draft } = chats.get(id);
+      const chat = chats.get(id);
+      const { messages, run, draft } = chat;
       const preview = previews.list().find((p) => p.id === id) ?? null;
-      return [200, { messages, run, draft, preview, budget: ledger.status(id) }];
+      return [200, { messages, run, draft, preview, budget: ledger.status(id), publish: await publishView(id, chat) }];
     }],
     ['POST', /^\/stores\/([^/]+)\/messages$/, async (req, id) => {
       const { text } = await body(req);
@@ -132,13 +151,24 @@ export function createApp(config = loadConfig(), deps = {}) {
       await stores.get(id);
       return [200, await runner.discard(id)];
     }],
+    ['POST', /^\/stores\/([^/]+)\/publish$/, async (_req, id) => {
+      const { commit } = await publisher.publish(id);
+      return [202, { started: true, commit }];
+    }],
+    ['POST', /^\/stores\/([^/]+)\/publish\/undo$/, async (_req, id) => {
+      await publisher.undo(id);
+      return [202, { started: true }];
+    }],
     ['GET', /^\/previews$/, async () => [200, { previews: previews.list() }]],
     ['POST', /^\/stores\/([^/]+)\/preview$/, async (_req, id) => [200, await previews.start(id)]],
     ['DELETE', /^\/stores\/([^/]+)\/preview$/, async (_req, id) => [200, { stopped: await previews.stop(id) }]],
   ];
 
   /** What the admin page sees (the same shape as the backend's ChatPresenter). */
-  const view = (id, chat) => presentChat(chat, { preview: previews.list().find((p) => p.id === id) ?? null, budget: ledger.status(id) });
+  const view = async (id, chat) => ({
+    ...presentChat(chat, { preview: previews.list().find((p) => p.id === id) ?? null, budget: ledger.status(id) }),
+    publish: await publishView(id, chat).catch(() => null),
+  });
 
   /**
    * GET /stores/:id/events?ticket=...: the chat pushed as server-sent events ("chat" on every change, "expired" when
@@ -167,7 +197,7 @@ export function createApp(config = loadConfig(), deps = {}) {
     // note: Cloudflare *quick* tunnels (trycloudflare.com) do not pass server-sent events on; the admin page then
     // keeps polling. Named tunnels and normal proxies stream them.
     res.write('retry: 3000\n\n');
-    const push = (chat) => res.write(`event: chat\ndata: ${JSON.stringify(view(id, chat))}\n\n`);
+    const push = async (chat) => res.write(`event: chat\ndata: ${JSON.stringify(await view(id, chat))}\n\n`);
     push(chats.get(id));
     const unwatch = chats.watch(id, push);
     const beat = setInterval(() => res.write(': keep-alive\n\n'), 15_000);
@@ -206,7 +236,7 @@ export function createApp(config = loadConfig(), deps = {}) {
     }
   });
 
-  return { server, stores, previews, aiConfig, ledger, chats, runner, browsers };
+  return { server, stores, previews, aiConfig, ledger, chats, runner, publisher, browsers };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
