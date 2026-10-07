@@ -9,10 +9,16 @@
  *   POST   /stores/:id/check           run the checks on the copy as it is
  *   POST   /stores/:id/update-starter  merge the starter's latest main (reverted on conflict or failed check)
  *   GET    /stores/:id/budget          this month's limit, spend, what is left, warning / blocked
- *   GET    /stores/:id/chat            messages, the current run (polled while it works), the open draft, budget
- *   GET    /stores/:id/events?ticket=  the same, pushed as server-sent events (browser; signed ticket, no key)
- *   POST   /stores/:id/messages        {text} -> 202 {runId}; 409 busy, 402 out of budget
- *   POST   /stores/:id/draft/approve   merge the draft into the store's copy
+ *   GET    /stores/:id/chats           the store's chats, newest first
+ *   POST   /stores/:id/chats           {title?} -> the new chat
+ *   PATCH  /stores/:id/chats/:chatId   {title}
+ *   DELETE /stores/:id/chats/:chatId   409 chat_busy while it builds or holds the open draft
+ *   GET    /stores/:id/chats/:chatId   the chat view (polled while it works)
+ *   POST   /stores/:id/chats/:chatId/messages  {text} -> 202 {runId}; 409 busy, 402 out of budget
+ *   GET    /stores/:id/events?ticket=&chat=  the chat view pushed as server-sent events (browser; signed ticket, no key)
+ *   GET    /stores/:id/chat            the first chat as raw data (the old single-chat route)
+ *   POST   /stores/:id/messages        {text} -> 202 {runId}, into the first chat (the old single-chat route)
+ *   POST   /stores/:id/draft/approve   merge the draft into the store's copy ({chatId?}: the chat the owner pressed it in)
  *   POST   /stores/:id/draft/discard   drop the draft
  *   POST   /stores/:id/publish         put the approved copy on the store's website -> 202 (polled in the chat)
  *   POST   /stores/:id/publish/undo    back to the version published before the last one -> 202
@@ -26,7 +32,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { ChangeError, createAgentRunner } from './agent.mjs';
 import { loadAiConfig } from './ai-config.mjs';
-import { createChats } from './chats.mjs';
+import { ChatError, MAIN_CHAT, createChats } from './chats.mjs';
 import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
@@ -56,8 +62,11 @@ const STATUS = {
   nothing_to_publish: 409,
   nothing_to_undo: 409,
   draft_open: 409,
+  chat_busy: 409,
+  busy_other_chat: 409,
+  invalid_title: 422,
 };
-const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError, PublishError];
+const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError, PublishError, ChatError];
 
 async function body(request) {
   let text = '';
@@ -101,11 +110,11 @@ export function createApp(config = loadConfig(), deps = {}) {
   const publisher = createPublisher({ config, stores, chats, isBusy: (id) => ledger.status(id).busy, log });
 
   /** The publish part of the chat view (null when the store has no website to publish to). */
-  async function publishView(id, chat) {
+  async function publishView(id, state) {
     const store = await stores.get(id);
     if (!store.publish?.siteUrl) return null;
     const approvedCommit = await publisher.branchHead(id).catch(() => null);
-    return publisher.view(chat, { siteUrl: store.publish.siteUrl, approvedCommit });
+    return publisher.view(state, { siteUrl: store.publish.siteUrl, approvedCommit });
   }
 
   const routes = [
@@ -137,30 +146,60 @@ export function createApp(config = loadConfig(), deps = {}) {
     }],
     ['GET', /^\/stores\/([^/]+)\/chat$/, async (_req, id) => {
       await stores.get(id);
-      const chat = chats.get(id);
-      const { messages, run, draft } = chat;
+      const state = chats.state.get(id);
+      const { messages } = chats.get(id, MAIN_CHAT);
       const preview = previews.list().find((p) => p.id === id) ?? null;
-      return [200, { messages, run, draft, preview, budget: ledger.status(id), publish: await publishView(id, chat) }];
+      return [200, { messages, run: state.run, draft: state.draft, preview, budget: ledger.status(id), publish: await publishView(id, state) }];
+    }],
+    ['GET', /^\/stores\/([^/]+)\/chats$/, async (_req, id) => {
+      await stores.get(id);
+      return [200, { chats: chats.list(id) }];
+    }],
+    ['POST', /^\/stores\/([^/]+)\/chats$/, async (req, id) => {
+      await stores.get(id);
+      const { title } = await body(req);
+      const chat = chats.create(id, { title });
+      return [201, { id: chat.id, title: chat.title }];
+    }],
+    ['PATCH', /^\/stores\/([^/]+)\/chats\/([^/]+)$/, async (req, id, chatId) => {
+      await stores.get(id);
+      const { title } = await body(req);
+      const chat = chats.rename(id, chatId, title);
+      return [200, { id: chat.id, title: chat.title }];
+    }],
+    ['DELETE', /^\/stores\/([^/]+)\/chats\/([^/]+)$/, async (_req, id, chatId) => {
+      await stores.get(id);
+      chats.remove(id, chatId);
+      return [204, null];
+    }],
+    ['GET', /^\/stores\/([^/]+)\/chats\/([^/]+)$/, async (_req, id, chatId) => {
+      await stores.get(id);
+      return [200, await view(id, chatId)];
+    }],
+    ['POST', /^\/stores\/([^/]+)\/chats\/([^/]+)\/messages$/, async (req, id, chatId) => {
+      const { text, command, url, selection } = await body(req);
+      const { runId } = await runner.send(id, text, { chatId, command, url, selection });
+      return [202, { runId }];
     }],
     ['POST', /^\/stores\/([^/]+)\/messages$/, async (req, id) => {
       const { text } = await body(req);
       const { runId } = await runner.send(id, text);
       return [202, { runId }];
     }],
-    ['POST', /^\/stores\/([^/]+)\/draft\/approve$/, async (_req, id) => {
+    ['POST', /^\/stores\/([^/]+)\/draft\/approve$/, async (req, id) => {
       await stores.get(id);
-      return [200, await runner.approve(id)];
+      return [200, await runner.approve(id, { chatId: (await body(req)).chatId })];
     }],
-    ['POST', /^\/stores\/([^/]+)\/draft\/discard$/, async (_req, id) => {
+    ['POST', /^\/stores\/([^/]+)\/draft\/discard$/, async (req, id) => {
       await stores.get(id);
-      return [200, await runner.discard(id)];
+      return [200, await runner.discard(id, { chatId: (await body(req)).chatId })];
     }],
-    ['POST', /^\/stores\/([^/]+)\/publish$/, async (_req, id) => {
-      const { commit } = await publisher.publish(id);
+    ['POST', /^\/stores\/([^/]+)\/publish$/, async (req, id) => {
+      const { commit } = await publisher.publish(id, { chatId: (await body(req)).chatId });
       return [202, { started: true, commit }];
     }],
-    ['POST', /^\/stores\/([^/]+)\/publish\/undo$/, async (_req, id) => {
-      await publisher.undo(id);
+    ['POST', /^\/stores\/([^/]+)\/publish\/undo$/, async (req, id) => {
+      await publisher.undo(id, { chatId: (await body(req)).chatId });
       return [202, { started: true }];
     }],
     ['GET', /^\/previews$/, async () => [200, { previews: previews.list() }]],
@@ -169,10 +208,20 @@ export function createApp(config = loadConfig(), deps = {}) {
   ];
 
   /** What the admin page sees (the same shape as the backend's ChatPresenter). */
-  const view = async (id, chat) => ({
-    ...presentChat(chat, { preview: previews.list().find((p) => p.id === id) ?? null, budget: ledger.status(id) }),
-    publish: await publishView(id, chat).catch(() => null),
-  });
+  async function view(id, chatId) {
+    const state = chats.state.get(id);
+    const titleOf = (other) => {
+      try {
+        return chats.get(id, other).title;
+      } catch {
+        return '';
+      }
+    };
+    return {
+      ...presentChat(chats.get(id, chatId), { state, titleOf, preview: previews.list().find((p) => p.id === id) ?? null, budget: ledger.status(id) }),
+      publish: await publishView(id, state).catch(() => null),
+    };
+  }
 
   /**
    * GET /stores/:id/events?ticket=...: the chat pushed as server-sent events ("chat" on every change, "expired" when
@@ -186,10 +235,12 @@ export function createApp(config = loadConfig(), deps = {}) {
     };
     const ticket = verifyTicket(config.serviceKey, new URL(req.url, 'http://local').searchParams.get('ticket'), id);
     if (!ticket.ok) return deny(401, { error: 'bad_ticket', message: ticket.reason });
+    const chatId = new URL(req.url, 'http://local').searchParams.get('chat') || MAIN_CHAT;
     try {
       await stores.get(id);
-    } catch {
-      return deny(404, { error: 'not_found', message: 'No such store.' });
+      chats.get(id, chatId);
+    } catch (error) {
+      return deny(404, { error: 'not_found', message: error instanceof ChatError ? 'No such chat.' : 'No such store.' });
     }
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
@@ -201,8 +252,14 @@ export function createApp(config = loadConfig(), deps = {}) {
     // note: Cloudflare *quick* tunnels (trycloudflare.com) do not pass server-sent events on; the admin page then
     // keeps polling. Named tunnels and normal proxies stream them.
     res.write('retry: 3000\n\n');
-    const push = async (chat) => res.write(`event: chat\ndata: ${JSON.stringify(await view(id, chat))}\n\n`);
-    push(chats.get(id));
+    const push = async () => {
+      try {
+        res.write(`event: chat\ndata: ${JSON.stringify(await view(id, chatId))}\n\n`);
+      } catch {
+        // the chat was deleted while open: the page notices on its next list refresh
+      }
+    };
+    push();
     const unwatch = chats.watch(id, push);
     const beat = setInterval(() => res.write(': keep-alive\n\n'), 15_000);
     const expiry = setTimeout(() => {

@@ -64,12 +64,14 @@ async function reset() {
   if ((await run('git', ['rev-parse', '--verify', '--quiet', `refs/heads/draft/${STORE}`], { cwd: workspace })).code === 0) await app.runner.discard(STORE);
   await git(['reset', '-q', '--hard', 'HEAD']);
   await git(['clean', '-q', '-fd']);
+  fs.rmSync(path.join(config.dataDir, 'chats', STORE), { recursive: true, force: true });
   fs.rmSync(path.join(config.dataDir, 'chats', `${STORE}.json`), { force: true });
+  fs.rmSync(path.join(config.dataDir, 'store-state', `${STORE}.json`), { force: true });
 }
 
 /** "{yes}" and "{option:N}" become what the owner would tap. */
 function resolveTurn(turn) {
-  const last = app.chats.get(STORE).messages.filter((m) => m.role === 'assistant').at(-1);
+  const last = app.chats.get(STORE, 'c_main').messages.filter((m) => m.role === 'assistant').at(-1);
   const options = last?.options ?? [];
   if (turn === '{yes}') return options.find((o) => /yes|go ahead|نعم|تمام/i.test(o)) ?? 'Yes, go ahead';
   const pick = /^\{option:(\d+)\}$/.exec(turn);
@@ -163,13 +165,14 @@ for (const testCase of todo) {
       turns.push(text);
       const { done } = await app.runner.send(STORE, text);
       await done;
-      outcomes.push(app.chats.get(STORE).run?.outcome ?? 'none');
+      outcomes.push(app.chats.state.get(STORE).run?.outcome ?? 'none');
     }
   } catch (error) {
     outcomes.push(`error`);
     logs.push(String(error.stack ?? error));
   }
-  const chat = app.chats.get(STORE);
+  const chat = app.chats.get(STORE, 'c_main');
+  const run = app.chats.state.get(STORE).run;
   const caseLogs = logs.slice(logStart).join('\n');
   const limitHit = (text) => USAGE_LIMIT.test(text ?? '');
   if (limitHit(caseLogs) || chat.messages.some((m) => limitHit(m.text))) {
@@ -178,7 +181,7 @@ for (const testCase of todo) {
     stoppedForLimits = true;
     break;
   }
-  const seen = { outcomes, ...(await changes()), reply: chat.messages.filter((m) => m.role === 'assistant').at(-1)?.text ?? '', judge: null };
+  const seen = { outcomes, ...(await changes()), reply: chat.messages.filter((m) => m.role === 'assistant').at(-1)?.text ?? '', refuseKind: chat.messages.filter((m) => m.role === 'assistant').at(-1)?.card?.refuseKind ?? null, judge: null };
   let judgeCost = 0;
   if (testCase.expect.see && outcomes.at(-1) === 'preview' && !flag('--no-judge')) {
     seen.judge = await judge(testCase, caseDir).catch((error) => ({ pass: false, reason: `judge error: ${error.message}`, costUsd: 0 }));
@@ -191,8 +194,8 @@ for (const testCase of todo) {
   }
   const score = scoreCase(testCase, seen);
   const costUsd = Math.max(0, app.ledger.status(STORE).spentUsd - spentBefore) + judgeCost;
-  results.push({ id: testCase.id, category: testCase.category, pass: score.pass, reasons: score.reasons, turns, outcomes, changedFiles: seen.changedFiles, sharedModified: seen.sharedModified, reply: seen.reply, judge: seen.judge, screenshots: chat.run?.screenshots ?? [], lastFailure: chat.run?.lastFailure ?? null, costUsd });
-  fs.writeFileSync(path.join(caseDir, 'chat.json'), JSON.stringify({ messages: chat.messages, run: chat.run, pending: chat.pending ?? null }, null, 2));
+  results.push({ id: testCase.id, category: testCase.category, pass: score.pass, reasons: score.reasons, turns, outcomes, changedFiles: seen.changedFiles, sharedModified: seen.sharedModified, reply: seen.reply, judge: seen.judge, screenshots: run?.screenshots ?? [], lastFailure: run?.lastFailure ?? null, costUsd });
+  fs.writeFileSync(path.join(caseDir, 'chat.json'), JSON.stringify({ messages: chat.messages, run, pending: chat.pending ?? null }, null, 2));
   fs.writeFileSync(path.join(caseDir, 'log.txt'), caseLogs);
   if (seen.changedFiles.length) fs.writeFileSync(path.join(caseDir, 'diff.patch'), await git(['diff', `store/${STORE}`, `draft/${STORE}`]).catch(() => ''));
   report();

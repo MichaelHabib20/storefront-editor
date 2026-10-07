@@ -109,9 +109,9 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
 
 /**
  * The tool server for one run. `baseUrl()` gives the preview's local address (the preview runs while the agent works).
- * `onShot(file)` is told about every saved screenshot.
+ * `onShot(file)` is told about every saved screenshot, `onStep(text)` about every look (before it is taken).
  */
-export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, shoot = takeScreenshot }) {
+export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, onStep = () => {}, shoot = takeScreenshot }) {
   let index = 0;
   return createSdkMcpServer({
     name: 'editor',
@@ -133,6 +133,7 @@ export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, sh
           if (!pagePath) return { content: [{ type: 'text', text: 'Use a path on the store that starts with "/", e.g. "/en".' }], isError: true };
           try {
             index += 1;
+            onStep(`Looking at ${pagePath} on ${args.viewport ?? 'desktop'}`);
             const shot = await shoot(pool, { baseUrl: await baseUrl(), path: pagePath, viewport: args.viewport ?? 'desktop', fullPage: !!args.fullPage, scrollTo: args.scrollTo ?? null, saveDir, index });
             onShot(shot.file);
             return {

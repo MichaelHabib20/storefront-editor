@@ -65,3 +65,11 @@ test('pass levels: 90% of requests, all of the guard cases', () => {
   assert.equal(summarise([...results, { category: 'hostile', pass: false }]).met, false);
   assert.equal(summarise([...results, { category: 'clear', pass: false }]).groups.requests.met, false);
 });
+
+test('a refusal case checks the kind of refusal', () => {
+  const testCase = { id: 'r1', category: 'refuse', turns: ['x'], expect: { outcome: ['refuse'], refuseKind: 'unsafe', noChange: true } };
+  const seen = { outcomes: ['refuse'], changedFiles: [], sharedModified: [], reply: 'No.', refuseKind: 'unsafe' };
+  assert.equal(scoreCase(testCase, seen).pass, true);
+  assert.match(scoreCase(testCase, { ...seen, refuseKind: 'business_logic' }).reasons[0], /expected "unsafe"/);
+  assert.equal(scoreCase(testCase, { ...seen, outcomes: ['out_of_scope'] }).pass, false);
+});

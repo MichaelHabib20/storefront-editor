@@ -45,11 +45,11 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
   /** Stores with a publish or undo running in this process. */
   const running = new Set();
 
-  const stateOf = (storeId) => chats.get(storeId).publish ?? { state: 'idle', history: [] };
+  const stateOf = (storeId) => chats.state.get(storeId).publish ?? { state: 'idle', history: [] };
   const setState = (storeId, change) =>
-    chats.update(storeId, (chat) => {
-      chat.publish ??= { state: 'idle', history: [] };
-      change(chat.publish);
+    chats.state.update(storeId, (state) => {
+      state.publish ??= { state: 'idle', history: [] };
+      change(state.publish);
     });
   /** Publishes still live, oldest first (undone ones and undo entries are not "versions"). */
   const versions = (publish) => (publish.history ?? []).filter((e) => e.kind === 'publish' && e.ok && !e.undone);
@@ -115,7 +115,7 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
 
   return {
     /** Starts publishing the approved copy; answers at once (`done` resolves when it is over, for tests). */
-    async publish(storeId) {
+    async publish(storeId, { chatId = null } = {}) {
       const { dir, siteUrl } = await settings(storeId);
       claim(storeId);
       let commit;
@@ -134,14 +134,14 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
           p.history = [...(p.history ?? []), entry];
           Object.assign(p, { state: 'idle', startedAt: null, commit: null, lastFailed: !entry.ok });
         });
-        chats.say(storeId, 'system', entry.ok ? `Published. Your changes are live on ${siteUrl}` : 'Publishing failed. Your website did not change.', { publish: entry.id });
+        chats.note(storeId, chatId, 'system', entry.ok ? `Published. Your changes are live on ${siteUrl}` : 'Publishing failed. Your website did not change.', { publish: entry.id });
         running.delete(storeId);
       })();
       return { started: true, commit, done };
     },
 
     /** Goes back to the version published before the last one: the code (one new commit) and the website. */
-    async undo(storeId) {
+    async undo(storeId, { chatId = null } = {}) {
       const { dir, siteUrl } = await settings(storeId);
       if (isBusy(storeId)) throw new PublishError('busy', 'A change is still running.');
       const cwd = stores.workspaceOf(storeId);
@@ -181,16 +181,16 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
           p.history.push(entry);
           Object.assign(p, { state: 'idle', startedAt: null, commit: null, lastFailed: !entry.ok });
         });
-        chats.say(storeId, 'system', entry.ok ? `Undid the last publish. Your website is back to the version from ${target.at.slice(0, 10)}.` : 'Undo failed. Your website and your approved changes did not change.', { publish: entry.id });
+        chats.note(storeId, chatId, 'system', entry.ok ? `Undid the last publish. Your website is back to the version from ${target.at.slice(0, 10)}.` : 'Undo failed. Your website and your approved changes did not change.', { publish: entry.id });
         running.delete(storeId);
       })();
       return { started: true, done };
     },
 
     /** What the admin page needs; `approvedCommit` is the store branch's head (null when unknown). */
-    view(chat, { siteUrl = null, approvedCommit = null } = {}) {
+    view(state, { siteUrl = null, approvedCommit = null } = {}) {
       if (!siteUrl) return null;
-      const publish = chat.publish ?? { state: 'idle', history: [] };
+      const publish = state.publish ?? { state: 'idle', history: [] };
       const live = versions(publish);
       const last = live.at(-1) ?? null;
       return {

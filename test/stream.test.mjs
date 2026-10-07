@@ -99,9 +99,9 @@ test('the stream sends the chat at once and every change after, in order, in the
   const ticket = signTicket(KEY, 'acme', Date.now() / 1000 + 60);
   const listening = listen(`${base}/stores/acme/events?ticket=${encodeURIComponent(ticket)}`, { count: 3 });
   await new Promise((r) => setTimeout(r, 300));
-  app.chats.say('acme', 'merchant', 'make the header green');
-  app.chats.update('acme', (chat) => {
-    chat.run = { id: 'r1', state: 'editing', model: 'claude-sonnet-5-5', costUsd: 0.12, lastFailure: { output: 'src/x.tsx' } };
+  app.chats.say('acme', 'c_main', 'merchant', 'make the header green');
+  app.chats.state.update('acme', (state) => {
+    state.run = { chatId: 'c_main', id: 'r1', state: 'editing', model: 'claude-sonnet-5-5', costUsd: 0.12, lastFailure: { output: 'src/x.tsx' } };
   });
   const result = await listening;
   result.close?.();
@@ -111,7 +111,7 @@ test('the stream sends the chat at once and every change after, in order, in the
   assert.deepEqual(result.events.map((e) => e.name), ['chat', 'chat', 'chat']);
   assert.equal(result.events[0].data.messages.length, 0);
   assert.equal(result.events[1].data.messages[0].text, 'make the header green');
-  assert.deepEqual(result.events[2].data.run, { id: 'r1', state: 'editing', startedAt: null });
+  assert.deepEqual(result.events[2].data.run, { id: 'r1', state: 'editing', startedAt: null, chatId: 'c_main', here: true, steps: [] });
   assert.equal(result.events[2].data.working, true);
   const raw = JSON.stringify(result.events);
   for (const hidden of ['claude', 'costUsd', 'lastFailure', 'src/x.tsx', 'limitUsd', 'spentUsd']) assert.ok(!raw.includes(hidden), hidden);

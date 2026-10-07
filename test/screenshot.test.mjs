@@ -158,7 +158,7 @@ test('with a dev preview the editing AI gets the screenshot tool and the instruc
     await app.stores.create('eyes', { apiUrl: 'https://api.eyes.test' });
     const { done } = await app.runner.send('eyes', 'make it say v2');
     await done;
-    assert.equal(app.chats.get('eyes').run.outcome, 'preview');
+    assert.equal(app.chats.state.get('eyes').run.outcome, 'preview');
     const { options } = calls[0];
     assert.equal(options.mcpServers.editor.type, 'sdk');
     assert.ok(options.allowedTools.includes(SCREENSHOT_TOOL));

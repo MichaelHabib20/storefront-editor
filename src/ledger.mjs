@@ -96,6 +96,16 @@ export function createLedger({ file, aiConfig, now = () => new Date() }) {
       return status(reservation.storeId);
     },
 
+    /** Charges a run that held no reservation (a chat that only talked while another chat built). */
+    record(storeId, charges) {
+      if (charges.some((charge) => !(charge.costUsd >= 0))) throw new BudgetError('invalid_charge', 'A charge needs a cost >= 0.');
+      const at = now().toISOString();
+      for (const charge of charges) {
+        append({ at, month: monthOf(now()), storeId, reservationId: null, runId: charge.runId, kind: charge.kind, model: charge.model ?? null, costUsd: round(charge.costUsd), usage: charge.usage ?? null });
+      }
+      return status(storeId);
+    },
+
     /** Frees the store without charging (the run never called a model). */
     release(reservation) {
       if (open.get(reservation.storeId)?.id === reservation.id) open.delete(reservation.storeId);

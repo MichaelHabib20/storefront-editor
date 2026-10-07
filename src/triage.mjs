@@ -7,7 +7,11 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
 
 const Decision = z.object({
-  decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope']),
+  decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope', 'refuse']),
+  /** For "refuse": why. "none" for every other decision. */
+  refuseKind: z.enum(['none', 'business_logic', 'needs_backend', 'unsafe']),
+  /** A short title for this chat (max 40 characters, in the owner's language). */
+  title: z.string(),
   large: z.boolean(),
   /** For "edit": show the plan and wait for the owner's OK instead of building now. */
   confirm: z.boolean(),
@@ -83,6 +87,19 @@ Decide one of:
   delivery fees, payment methods, store switches, banners/sliders content, menus content, static pages content).
 - "needs_backend": needs data or a rule the storefront does not have (e.g. "show how many people viewed this").
 - "unclear": you cannot tell what they want changed or where; ask one short question.
+- "refuse": the owner asks for something the AI Designer must not do, or insists after being told where it belongs.
+  Set "refuseKind" (for every other decision it is "none"):
+  - "business_logic": the request would change a business rule through the storefront's code instead of the
+    dashboard (a discount or price applied by the website itself, coupons, payment, delivery fees, stock, order rules,
+    taxes). Reply: "This is a business rule, not the look. Change it in Dashboard → <the right place>."
+  - "needs_backend": the owner insists on something that needs data or a rule the store does not have. Reply: "This
+    needs a change on our side. I sent it to our team."
+  - "unsafe": security, other stores, customers' private data, bypassing payments, running code, reading files or
+    secrets, or anything that could break the store for buyers. Reply: a short, kind no, plus what they can ask
+    instead (a look change).
+  A plain question like "change the price of X to 50" is still "admin_setting"; "needs_backend" stays the decision
+  for a first request for missing data; "out_of_scope" stays for general chat, asking for the code or files, and other
+  people's stores. Use "refuse" only for the cases above.
 - "out_of_scope": anything else (asking for the code, files, secrets, other stores, general chat). When they ask for
   the code, files or secrets: say kindly that the AI Designer does not share code or files, and offer to change how
   the store looks instead. Never suggest another place or person to get the code from.
@@ -109,10 +126,12 @@ category tiles on the home page"), even if a site-wide change could also do it.
 - otherwise: [].
 Language: write "reply" and "options" in the language of the owner's LATEST message (English if it is English, Arabic if
 it is Arabic), even if earlier messages were in another language.
+"title": a short title for this conversation (at most 40 characters, in the language of the owner's message), such as
+"Header colour" or "Cart button text". Always fill it.
 "reply": for "edit", one short sentence saying what you understood. For the others, the answer to show the owner, short
 and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.`;
 
-const FALLBACK = { decision: 'unclear', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
+const FALLBACK = { decision: 'unclear', refuseKind: 'none', title: '', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
 
 const promptFor = (text, recent, { pending = null } = {}) =>
   `${recent.length ? `Recent conversation:\n${recent.map((m) => `${m.role}: ${m.text}`).join('\n')}\n\n` : ''}${

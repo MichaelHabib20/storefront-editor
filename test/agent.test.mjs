@@ -360,8 +360,8 @@ test('one message at a time; an empty budget refuses', async () => {
 });
 
 test('after Discard the AI is told the earlier change is gone', async () => {
-  app.chats.say('acme', 'system', 'Discarded.');
-  const recent = app.chats.recent('acme', 3);
+  app.chats.say('acme', 'c_main', 'system', 'Discarded.');
+  const recent = app.chats.recent('acme', 'c_main', 3);
   assert.match(recent.at(-1).text, /pressed Discard/);
 });
 
