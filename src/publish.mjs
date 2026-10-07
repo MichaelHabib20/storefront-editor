@@ -75,10 +75,12 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
     for (const name of await fs.readdir(dir)) {
       if (!KEEP.has(name)) await fs.rm(path.join(dir, name), { recursive: true, force: true, maxRetries: 3 });
     }
-    const tar = path.join(os.tmpdir(), `publish-${randomUUID()}.tar`);
+    const name = `publish-${randomUUID()}.tar`;
+    const tar = path.join(os.tmpdir(), name);
     try {
       await git(['archive', '--format=tar', '-o', tar, commit]);
-      await must('tar', ['-xf', tar, '-C', dir], { cwd: dir });
+      // the archive by its bare name: GNU tar (Git for Windows' one) reads "C:\..." as a remote host
+      await must('tar', ['-xf', name, '-C', dir], { cwd: os.tmpdir() });
     } finally {
       await fs.rm(tar, { force: true });
     }
