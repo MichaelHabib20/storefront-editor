@@ -15,6 +15,11 @@
  *   DELETE /stores/:id/chats/:chatId   409 chat_busy while it builds or holds the open draft
  *   GET    /stores/:id/chats/:chatId   the chat view (polled while it works)
  *   POST   /stores/:id/chats/:chatId/messages  {text} -> 202 {runId}; 409 busy, 402 out of budget
+ *   GET    /stores/:id/reports         this store's bug reports to our team (id, date, status, summary)
+ *   GET    /team/reports?status=&store=   all reports (also needs x-editor-team-key = EDITOR_TEAM_KEY; else 404)
+ *   GET    /team/reports/:id              one report with the steps, errors and notes
+ *   PATCH  /team/reports/:id              {status?, note?}; "fixed" tells the owner's chat
+ *   GET    /team/reports/:id/files/:file  a screenshot or picture of a report
  *   GET    /stores/:id/events?ticket=&chat=  the chat view pushed as server-sent events (browser; signed ticket, no key)
  *   GET    /stores/:id/chat            the first chat as raw data (the old single-chat route)
  *   POST   /stores/:id/messages        {text} -> 202 {runId}, into the first chat (the old single-chat route)
@@ -33,7 +38,9 @@ import { pathToFileURL } from 'node:url';
 import { ChangeError, createAgentRunner } from './agent.mjs';
 import { loadAiConfig } from './ai-config.mjs';
 import { ChatError, MAIN_CHAT, createChats } from './chats.mjs';
+import { createDiagnoser } from './diagnose.mjs';
 import { ImageError, readImage } from './images.mjs';
+import { ReportError, createReports } from './reports.mjs';
 import { loadConfig } from './config.mjs';
 import { BudgetError, createLedger } from './ledger.mjs';
 import { createPreviews, PreviewError } from './preview.mjs';
@@ -66,12 +73,13 @@ const STATUS = {
   chat_busy: 409,
   busy_other_chat: 409,
   invalid_title: 422,
+  invalid_status: 422,
   too_many_images: 422,
   image_too_large: 422,
   image_type: 422,
   image_invalid: 422,
 };
-const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError, PublishError, ChatError, ImageError];
+const KNOWN = [StoreError, PreviewError, BudgetError, ChangeError, PublishError, ChatError, ImageError, ReportError];
 
 /** A message with pictures is bigger: 3 pictures of 2 MB are about 8,000,000 characters of base64. */
 const PICTURE_BODY_LIMIT = 12_000_000;
@@ -128,7 +136,12 @@ export function createApp(config = loadConfig(), deps = {}) {
   });
   const browsers = deps.browsers === undefined ? createBrowserPool() : deps.browsers;
   const log = deps.log ?? ((...a) => console.log(...a));
-  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, browsers, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log });
+  const reports = createReports({
+    dataDir: config.dataDir,
+    onFixed: (report) => chats.note(report.storeId, report.chatId, 'system', `Our team fixed the problem you reported: ${report.summary}`),
+  });
+  const diagnoser = browsers ? createDiagnoser({ config, stores, previews, chats, reports, browsers, ...(deps.query ? { query: deps.query } : {}), log }) : null;
+  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, browsers, diagnoser, reports, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log });
   const publisher = createPublisher({ config, stores, chats, isBusy: (id) => ledger.status(id).busy, log });
 
   /** The publish part of the chat view (null when the store has no website to publish to). */
@@ -173,6 +186,10 @@ export function createApp(config = loadConfig(), deps = {}) {
       const preview = previews.list().find((p) => p.id === id) ?? null;
       return [200, { messages, run: state.run, draft: state.draft, preview, budget: ledger.status(id), publish: await publishView(id, state) }];
     }],
+    ['GET', /^\/stores\/([^/]+)\/reports$/, async (_req, id) => {
+      await stores.get(id);
+      return [200, { reports: reports.listForStore(id) }];
+    }],
     ['GET', /^\/stores\/([^/]+)\/chats$/, async (_req, id) => {
       await stores.get(id);
       return [200, { chats: chats.list(id) }];
@@ -206,8 +223,8 @@ export function createApp(config = loadConfig(), deps = {}) {
       return [200, image.bytes, image.mediaType];
     }],
     ['POST', /^\/stores\/([^/]+)\/chats\/([^/]+)\/messages$/, async (req, id, chatId) => {
-      const { text, images, command, url, selection } = await body(req, PICTURE_BODY_LIMIT);
-      const { runId } = await runner.send(id, text, { chatId, images, command, url, selection });
+      const { text, images, command, cardId, url, selection } = await body(req, PICTURE_BODY_LIMIT);
+      const { runId } = await runner.send(id, text, { chatId, images, command, cardId, url, selection });
       return [202, { runId }];
     }],
     ['POST', /^\/stores\/([^/]+)\/messages$/, async (req, id) => {
@@ -237,6 +254,15 @@ export function createApp(config = loadConfig(), deps = {}) {
   ];
 
   /** What the admin page sees (the same shape as the backend's ChatPresenter). */
+  /** A bug report's status for the card in the chat (null when there is none). */
+  const reportStatus = (reportId) => {
+    try {
+      return reports.get(reportId).status;
+    } catch {
+      return null;
+    }
+  };
+
   async function view(id, chatId) {
     const state = chats.state.get(id);
     const titleOf = (other) => {
@@ -247,7 +273,7 @@ export function createApp(config = loadConfig(), deps = {}) {
       }
     };
     return {
-      ...presentChat(chats.get(id, chatId), { state, titleOf, preview: previews.list().find((p) => p.id === id) ?? null, budget: ledger.status(id) }),
+      ...presentChat(chats.get(id, chatId), { state, titleOf, reportStatus,  preview: previews.list().find((p) => p.id === id) ?? null, budget: ledger.status(id) }),
       publish: await publishView(id, state).catch(() => null),
     };
   }
@@ -302,6 +328,26 @@ export function createApp(config = loadConfig(), deps = {}) {
     });
   }
 
+  /** /team/reports...: the list, one report, its status and notes, its files. */
+  async function teamRoute(req, pathname, send) {
+    const params = new URL(req.url, 'http://local').searchParams;
+    let match;
+    if (req.method === 'GET' && pathname === '/team/reports') return send(200, { reports: reports.list({ status: params.get('status'), store: params.get('store') }) });
+    if ((match = pathname.match(/^\/team\/reports\/([^/]+)$/))) {
+      const id = decodeURIComponent(match[1]);
+      if (req.method === 'GET') return send(200, reports.get(id));
+      if (req.method === 'PATCH') {
+        const { status, note } = await body(req);
+        return send(200, reports.patch(id, { status, note }));
+      }
+    }
+    if (req.method === 'GET' && (match = pathname.match(/^\/team\/reports\/([^/]+)\/files\/([^/]+)$/))) {
+      const file = reports.file(decodeURIComponent(match[1]), decodeURIComponent(match[2]));
+      return send(200, file.bytes, file.mediaType);
+    }
+    return send(404, { error: 'not_found', message: 'No such route.' });
+  }
+
   const server = http.createServer(async (req, res) => {
     const send = (status, payload, binaryType = null) => {
       if (Buffer.isBuffer(payload)) {
@@ -316,6 +362,11 @@ export function createApp(config = loadConfig(), deps = {}) {
     if (events) return stream(req, res, decodeURIComponent(events[1]));
     if (config.serviceKey && !keyMatches(req.headers['x-editor-key'], config.serviceKey)) return send(401, { error: 'unauthorized', message: 'Missing or wrong x-editor-key.' });
     try {
+      if (pathname.startsWith('/team/')) {
+        // our team's routes need a second key; without one set, or a wrong one, they are simply not there
+        if (!config.teamKey || !keyMatches(req.headers['x-editor-team-key'], config.teamKey)) return send(404, { error: 'not_found', message: 'No such route.' });
+        return await teamRoute(req, pathname, send);
+      }
       for (const [method, pattern, handler] of routes) {
         const match = pathname.match(pattern);
         if (match && req.method === method) return send(...(await handler(req, ...match.slice(1).map(decodeURIComponent))));
@@ -330,7 +381,7 @@ export function createApp(config = loadConfig(), deps = {}) {
     }
   });
 
-  return { server, stores, previews, aiConfig, ledger, chats, runner, publisher, browsers };
+  return { server, stores, previews, aiConfig, ledger, chats, runner, publisher, browsers, reports, diagnoser };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

@@ -18,14 +18,39 @@ function options(list) {
 }
 
 /** Only the parts of a card the owner may see. */
-function cardOf(kind, card) {
-  if (kind === 'refusal') return { refuseKind: REFUSE_KINDS.includes(card?.refuseKind) ? card.refuseKind : 'unsafe' };
+const CAUSES = ['store_change', 'platform', 'data_or_setting', 'not_reproduced'];
+
+function cardOf(kind, card, reportStatus) {
+  if (kind === 'refusal') {
+    const report = card?.reportId ? reportStatus(card.reportId) : null;
+    return { refuseKind: REFUSE_KINDS.includes(card?.refuseKind) ? card.refuseKind : 'unsafe', ...(report ? { report: { status: report } } : {}) };
+  }
+  if (kind === 'bug_report' && card) {
+    const cause = CAUSES.includes(card.cause) ? card.cause : 'not_reproduced';
+    const open = !card.used;
+    const report = card.reportId ? reportStatus(card.reportId) : null;
+    // what the owner can press: the button texts come from the page, not from here
+    const actions = [];
+    if (open && cause === 'store_change' && card.suspectCommit) actions.push('undo');
+    if (open && cause === 'store_change' && card.fixPlan) actions.push('fix');
+    if (cause === 'not_reproduced') actions.push('more_detail');
+    return {
+      reproduced: !!card.reproduced,
+      cause,
+      steps: (Array.isArray(card.steps) ? card.steps : []).slice(0, 10).map((s) => String(s).slice(0, 160)),
+      ...(cause === 'store_change' && card.suspectTitle ? { suspectTitle: String(card.suspectTitle).slice(0, 80) } : {}),
+      ...(cause === 'data_or_setting' && card.adminPlace ? { adminPlace: String(card.adminPlace).slice(0, 120) } : {}),
+      ...(report ? { report: { status: report } } : {}),
+      used: card.used === 'undo' || card.used === 'fix' ? card.used : null,
+      actions,
+    };
+  }
   return null;
 }
 
-function messageOf(m, chatId) {
+function messageOf(m, chatId, reportStatus) {
   const kind = KINDS.includes(m.kind) ? m.kind : 'text';
-  const card = cardOf(kind, m.card);
+  const card = cardOf(kind, m.card, reportStatus);
   return {
     id: String(m.id ?? ''),
     role: m.role,
@@ -46,7 +71,7 @@ const steps = (list) => (Array.isArray(list) ? list : []).slice(-50).map((s) => 
  * @param chat   one chat
  * @param state  the store state ({ run, draft }), `titleOf(chatId)` names a chat
  */
-export function presentChat(chat, { state = {}, titleOf = () => '', preview = null, budget = null } = {}) {
+export function presentChat(chat, { state = {}, titleOf = () => '', reportStatus = () => null, preview = null, budget = null } = {}) {
   const storeRun = state.run && typeof state.run === 'object' ? state.run : null;
   const here = !!storeRun && storeRun.chatId === chat.id;
   const light = chat.lightRun && typeof chat.lightRun === 'object' ? chat.lightRun : null;
@@ -56,9 +81,9 @@ export function presentChat(chat, { state = {}, titleOf = () => '', preview = nu
   return {
     ready: true,
     chat: { id: chat.id, title: String(chat.title ?? '') },
-    messages: (chat.messages ?? []).filter((m) => ROLES.includes(m.role)).map((m) => messageOf(m, chat.id)),
+    messages: (chat.messages ?? []).filter((m) => ROLES.includes(m.role)).map((m) => messageOf(m, chat.id, reportStatus)),
     working: status !== null && status !== 'done',
-    run: mine ? { id: String(mine.id ?? ''), state: status, startedAt: mine.startedAt ?? null, chatId: chat.id, here: true, steps: here ? steps(mine.steps) : [] } : null,
+    run: mine ? { id: String(mine.id ?? ''), state: status, startedAt: mine.startedAt ?? null, chatId: chat.id, here: true, steps: steps(mine.steps) } : null,
     otherChatBuilding: otherBuilding ? { chatId: otherBuilding, title: titleOf(otherBuilding) } : null,
     draft: state.draft ? { updatedAt: state.draft.updatedAt ?? null, chatId: state.draft.chatId ?? null, chatTitle: state.draft.chatId ? titleOf(state.draft.chatId) : null } : null,
     preview: preview?.url ? { url: preview.url } : null,

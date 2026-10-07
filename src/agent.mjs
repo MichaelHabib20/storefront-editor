@@ -16,6 +16,7 @@ import { PreviewError } from './preview.mjs';
 import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
 import { must, run } from './run.mjs';
 import { BudgetError } from './ledger.mjs';
+import fs from 'node:fs';
 import { checkImages, loadImages, promptWithImages, saveImages } from './images.mjs';
 import { MAIN_CHAT, NEW_CHAT_TITLE, cleanTitle } from './chats.mjs';
 
@@ -64,7 +65,7 @@ export function askShared(ownerText) {
   };
 }
 
-export function createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, query = sdkQuery, files, browsers = null, log = () => {} }) {
+export function createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, query = sdkQuery, files, browsers = null, diagnoser = null, reports = null, log = () => {} }) {
   const policy = createFilePolicy(files);
   const generated = files.generated ?? [];
   const git = (args, cwd) => must('git', args, { cwd });
@@ -218,10 +219,81 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     });
   }
 
+  /** One line of the live list of a run that only talks. */
+  function addLightStep(storeId, chatId, text) {
+    chats.update(storeId, chatId, (chat) => {
+      if (!chat.lightRun) return;
+      chat.lightRun.steps = [...(chat.lightRun.steps ?? []), { at: new Date().toISOString(), kind: 'phase', text }].slice(-50);
+    });
+  }
+
   /** The owner's language for the few fixed sentences the editor says itself. */
   const said = (ownerText, en, ar) => (/[؀-ۿ]/.test(ownerText) ? ar : en);
 
-  async function work(storeId, chatId, runId, text, reservation, light, images = [], savedRefs = []) {
+  /** The bug card a button was pressed on (null when it is not there, used already, or has nothing to act on). */
+  function cardOf(storeId, chatId, cardId) {
+    const message = chats.get(storeId, chatId).messages.find((m) => m.id === cardId && m.kind === 'bug_report');
+    const card = message?.card;
+    if (!card || card.used || card.cause !== 'store_change') return null;
+    return card;
+  }
+
+  /** "Checked again: fixed" / "Still happens": the bug's steps repeated in a fresh browser after a fix or an undo. */
+  async function announceRecheck(storeId, chatId, runId, text, recheck) {
+    addStep(storeId, 'Checking the problem again');
+    const verdict = await diagnoser?.recheck(storeId, recheck);
+    if (!verdict) return;
+    const lines = {
+      fixed: ['Checked again: fixed.', 'تمت إعادة الفحص: تم الإصلاح.'],
+      still: ['Checked again: it still happens.', 'تمت إعادة الفحص: المشكلة ما زالت موجودة.'],
+    }[verdict];
+    chats.say(storeId, chatId, 'assistant', said(text, ...lines), { runId, recheck: verdict });
+  }
+
+  /**
+   * "Undo the change": one earlier change of the AI Designer reverted as a normal draft (Approve and Discard work as
+   * usual). No AI call. Conflicts or failing checks leave the draft as it was.
+   */
+  async function undoChange({ storeId, chatId, runId, text, job, cwd, phase }) {
+    await ensureDraft(storeId, cwd);
+    phase('editing', 'Undoing the change');
+    const before = (await git(['rev-parse', 'HEAD'], cwd)).trim();
+    const sorry = (reason) =>
+      chats.say(storeId, chatId, 'assistant', said(text, 'I could not undo that change by itself, so nothing was changed. You were not charged for it.', 'لم أستطع التراجع عن هذا التغيير تلقائيًا، لذلك لم يتغير شيء. لم يتم خصم أي رصيد.'), { runId, error: reason });
+    const reverted = await run('git', [...AUTHOR, 'revert', '--no-edit', job.undo.commit], { cwd });
+    if (reverted.code !== 0) {
+      await run('git', ['revert', '--abort'], { cwd });
+      await resetWorkspace(cwd);
+      sorry('undo_conflict');
+      return 'undo_conflict';
+    }
+    const changed = (await git(['diff', '--name-only', before, 'HEAD'], cwd)).split('\n').map((f) => f.trim()).filter((f) => f && fs.existsSync(path.join(cwd, f)));
+    phase('checking', 'Checking everything still works', { files: changed.length });
+    const checked = await stores.check(storeId, { files: changed });
+    if (!checked.ok) {
+      setRun(storeId, { lastFailure: { round: 0, step: checked.step, output: String(checked.output ?? '').slice(-4000) } });
+      await git(['reset', '-q', '--hard', before], cwd);
+      sorry('checks_failed');
+      return 'checks_failed';
+    }
+    phase('building_preview', 'Preparing the preview');
+    let preview;
+    try {
+      preview = await previews.start(storeId);
+    } catch (error) {
+      await git(['reset', '-q', '--hard', before], cwd);
+      throw error;
+    }
+    const commit = (await git(['rev-parse', 'HEAD'], cwd)).trim();
+    chats.state.update(storeId, (state) => {
+      state.draft = { branch: draftOf(storeId), commit, updatedAt: new Date().toISOString(), chatId: state.draft?.chatId ?? chatId };
+    });
+    chats.say(storeId, chatId, 'assistant', said(text, `Done. I undid "${job.undo.title}". Have a look at the preview.`, `تم. تراجعت عن "${job.undo.title}". ألقِ نظرة على المعاينة.`), { runId, preview: preview.url });
+    if (job.recheck) await announceRecheck(storeId, chatId, runId, text, job.recheck);
+    return 'preview';
+  }
+
+  async function work(storeId, chatId, runId, text, reservation, light, images = [], savedRefs = [], command = null) {
     const settings = aiConfig.forStore(storeId);
     const cwd = stores.workspaceOf(storeId);
     const charges = [];
@@ -241,8 +313,15 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
 
     try {
       const pending = chats.get(storeId, chatId).pending ?? null;
-      const decision = await triage(text, chats.recent(storeId, chatId), { pending, images });
-      charge({ kind: 'triage', model: decision.model, costUsd: decision.costUsd, usage: decision.usage });
+      // a button of the page (Fix a bug, Undo the change, Fix it instead) says what it wants: no triage for those
+      const card = command && command.name !== 'fix_bug' ? cardOf(storeId, chatId, command.cardId) : null;
+      let decision;
+      if (command?.name === 'fix_bug') {
+        decision = { decision: 'bug', refuseKind: 'none', title: text.slice(0, 40), reply: said(text, 'I will look into it.', 'سأبحث في الأمر.'), model: null, costUsd: 0, usage: null };
+      } else if (command) {
+        decision = { decision: card ? 'edit' : 'unclear', refuseKind: 'none', title: '', reply: card ? 'On it.' : said(text, 'That suggestion is not available any more.', 'هذا الاقتراح لم يعد متاحًا.'), model: null, costUsd: 0, usage: null };
+      } else decision = await triage(text, chats.recent(storeId, chatId), { pending, images });
+      if (decision.model) charge({ kind: 'triage', model: decision.model, costUsd: decision.costUsd, usage: decision.usage });
       const title = cleanTitle(decision.title);
       if (title && chats.get(storeId, chatId).title === NEW_CHAT_TITLE) chats.rename(storeId, chatId, title);
 
@@ -259,17 +338,62 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'plan', options: cleanOptions(decision.options) });
         outcome = 'plan';
         return;
+      } else if (command && card) {
+        // Undo the change / Fix it instead: from the bug card the owner pressed it on
+        const used = command.name === 'bug_undo' ? 'undo' : 'fix';
+        job = command.name === 'bug_undo' ? { undo: { commit: card.suspectCommit, title: card.suspectTitle }, images: [], recheck: card.recheck } : { task: card.fixPlan, large: false, shared: true, images: [], recheck: card.recheck };
+        chats.update(storeId, chatId, (chat) => {
+          const message = chat.messages.find((m) => m.id === command.cardId);
+          if (message?.card) message.card.used = used;
+        });
+        ack = decision.reply;
       } else if (decision.decision === 'edit') {
         job = { task: decision.task, large: decision.large, shared: !!decision.shared, images };
         ack = decision.reply;
       } else if (decision.decision === 'bug') {
-        // looking into bugs comes with the Fix a bug mode; until then the owner is asked for the details
+        if (!diagnoser || !browsers) {
+          chats.say(storeId, chatId, 'assistant', said(text, 'I cannot look at your store right now. Please describe what you see, or try again in a few minutes.', 'لا أستطيع فحص متجرك الآن. صف لي ما تراه، أو حاول مرة أخرى بعد قليل.'), { runId });
+          outcome = 'bug';
+          return;
+        }
         chats.say(storeId, chatId, 'assistant', decision.reply, { runId });
-        outcome = 'bug';
+        const step = (line) => (light ? addLightStep(storeId, chatId, line) : addStep(storeId, line));
+        step('Reading your report');
+        const found = await diagnoser.diagnose({
+          storeId,
+          chatId,
+          runId,
+          text,
+          images,
+          savedRefs,
+          model: aiConfig.editModel(storeId, { large: false }),
+          settings,
+          maxBudgetUsd: (reservation?.amountUsd ?? settings.perRequestMaxUsd) - spent,
+          guard: fileGuard(cwd, policy),
+          onStep: step,
+          onShot: (file) => {
+            if (!light) setRun(storeId, { screenshots: [...(chats.state.get(storeId).run?.screenshots ?? []), file] });
+          },
+        });
+        charge(found.charge, true);
+        if (found.failed) throw new ChangeError('agent_failed', 'The diagnosis gave no usable answer.');
+        chats.say(storeId, chatId, 'assistant', found.text, { runId, kind: 'bug_report', card: found.card, ...(found.images.length ? { images: found.images } : {}) });
+        outcome = found.reproduced ? 'bug_found' : 'bug_not_reproduced';
         return;
       } else if (decision.decision === 'refuse') {
         const refuseKind = ['business_logic', 'needs_backend', 'unsafe'].includes(decision.refuseKind) ? decision.refuseKind : 'unsafe';
-        chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'refusal', card: { refuseKind } });
+        // something the store needs from us: our team gets the owner's words (and pictures)
+        const report =
+          refuseKind === 'needs_backend' && reports
+            ? reports.create({
+                storeId,
+                chatId,
+                summary: (decision.task || text).slice(0, 300),
+                ownerText: text,
+                files: { images: savedRefs.map((r) => ({ path: path.join(config.dataDir, 'uploads', storeId, chatId, r.file), name: r.file })) },
+              })
+            : null;
+        chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'refusal', card: { refuseKind, ...(report ? { reportId: report.id } : {}) } });
         outcome = 'refuse';
         return;
       } else {
@@ -312,6 +436,11 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       }
       chats.say(storeId, chatId, 'assistant', ack, { runId, kind: 'understood' });
       setPending(storeId, chatId, null);
+
+      if (job.undo) {
+        outcome = await undoChange({ storeId, chatId, runId, text, job, cwd, phase });
+        return;
+      }
 
       const model = aiConfig.editModel(storeId, { large: job.large });
       await ensureDraft(storeId, cwd);
@@ -365,6 +494,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
             });
             chats.say(storeId, chatId, 'assistant', turn.text || 'Done. Have a look at the preview.', { runId, preview: preview.url });
             outcome = 'preview';
+            if (job.recheck) await announceRecheck(storeId, chatId, runId, text, job.recheck);
             return;
           } catch (error) {
             if (!(error instanceof PreviewError) || error.code !== 'build_failed') {
@@ -399,10 +529,12 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       try {
         if (reservation) {
           status = ledger.settle(reservation, charges);
-          refunded = !['preview', 'no_change'].includes(outcome) && refundable.length ? refundable.reduce((a, b) => a + b, 0) : 0;
+          refunded = !['preview', 'no_change', 'bug_found'].includes(outcome) && refundable.length ? refundable.reduce((a, b) => a + b, 0) : 0;
           if (refunded > 0) status = ledger.refund(storeId, runId, refunded, outcome);
         } else {
           status = ledger.record(storeId, charges);
+          refunded = !['preview', 'no_change', 'bug_found'].includes(outcome) && refundable.length ? refundable.reduce((a, b) => a + b, 0) : 0;
+          if (refunded > 0) status = ledger.refund(storeId, runId, refunded, outcome);
         }
       } catch (error) {
         log('settle failed', storeId, runId, error);
@@ -435,7 +567,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
      * `out_of_budget` before anything starts. While another chat holds the store's build, the message still gets
      * an answer (a question, a plan); a build waits and the chat says which chat is building.
      */
-    async send(storeId, text, { chatId = MAIN_CHAT, images: rawImages } = {}) {
+    async send(storeId, text, { chatId = MAIN_CHAT, images: rawImages, command: rawCommand, cardId } = {}) {
       await stores.get(storeId);
       undoGuard(storeId);
       if (typeof text !== 'string' || !text.trim()) throw new ChangeError('empty_message', 'The message is empty.');
@@ -471,7 +603,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           state.run = { id: runId, chatId, state: 'triage', startedAt, outcome: null, round: 0, steps: [{ at: startedAt, kind: 'phase', text: 'Reading your request' }], updatedAt: startedAt };
         });
       }
-      const done = work(storeId, chatId, runId, text.trim(), reservation, light, images, savedRefs);
+      const command = ['fix_bug', 'bug_undo', 'bug_fix'].includes(rawCommand) ? { name: rawCommand, cardId: typeof cardId === 'string' ? cardId : null } : null;
+      const done = work(storeId, chatId, runId, text.trim(), reservation, light, images, savedRefs, command);
       return { runId, done };
     },
 

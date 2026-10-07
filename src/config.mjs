@@ -62,6 +62,13 @@ export function loadConfig(env = process.env) {
     turnTimeoutMs: Number(env.EDITOR_TURN_TIMEOUT_MS ?? 10 * 60_000),
     /** Shared secret the backend sends as `x-editor-key` (unset: no check, local development only). */
     serviceKey: env.EDITOR_SERVICE_KEY ?? null,
+    /**
+     * The test customer the bug-finding browser signs in with on logged-in pages (never shown to the AI). Unset: the
+     * `login` step answers "No test customer is set up".
+     */
+    testLogin: { identifier: env.EDITOR_TEST_LOGIN_PHONE ?? null, password: env.EDITOR_TEST_LOGIN_PASSWORD ?? null },
+    /** Second key of the team routes (/team/...): unset, they do not exist (404). */
+    teamKey: env.EDITOR_TEAM_KEY ?? null,
     /** The editor's own HTTP API. */
     port: Number(env.EDITOR_PORT ?? 4300),
   };

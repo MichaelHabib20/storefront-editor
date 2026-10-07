@@ -25,6 +25,7 @@ let triageAnswer;
 let triageCalls;
 let agentScript;
 let agentPrompts;
+let diagnosisAnswer;
 let total = 0;
 
 const fakeTriage = async (text, recent, context) => {
@@ -32,15 +33,15 @@ const fakeTriage = async (text, recent, context) => {
   return { refuseKind: 'none', title: '', ...triageAnswer, model: 'claude-haiku-4-5', costUsd: 0.001, usage: {} };
 };
 
-async function fakeQuery({ prompt, options }) {
-  const blocks = typeof prompt === 'string' ? null : (await prompt[Symbol.asyncIterator]().next()).value.message.content;
+function fakeQuery({ prompt, options }) {
   const step = agentScript.shift();
-  agentPrompts.push({ text: typeof prompt === 'string' ? prompt : blocks.find((b) => b.type === 'text').text, images: blocks ? blocks.filter((b) => b.type === 'image') : [] });
   return (async function* () {
+    const blocks = typeof prompt === 'string' ? null : (await prompt[Symbol.asyncIterator]().next()).value.message.content;
+    agentPrompts.push({ text: typeof prompt === 'string' ? prompt : blocks.find((b) => b.type === 'text').text, images: blocks ? blocks.filter((b) => b.type === 'image') : [] });
     yield { type: 'system', subtype: 'init', session_id: 's1' };
     await step?.(options.cwd);
     total += 0.1;
-    yield { type: 'result', subtype: 'success', result: 'I changed it.', total_cost_usd: total, modelUsage: {}, session_id: 's1' };
+    yield { type: 'result', subtype: 'success', result: 'I changed it.', ...(options.outputFormat ? { structured_output: diagnosisAnswer } : {}), total_cost_usd: total, modelUsage: {}, session_id: 's1' };
   })();
 }
 
@@ -156,6 +157,7 @@ test('a message with pictures: saved, shown, served; triage and the editing AI b
   agentScript = [(cwd) => write(cwd, 'src/page.txt', 'red pill')];
   const v = await sendAndWait(chat, 'make the buttons like this', [asImage(big), asImage(jpeg(), 'image/jpeg')]);
 
+  assert.equal(app.chats.state.get('acme').run.outcome, 'preview');
   assert.equal(triageCalls[0].images.length, 2);
   assert.equal(triageCalls[0].images[0].data, big.toString('base64'));
   assert.equal(agentPrompts.length, 1);
@@ -195,19 +197,24 @@ test('a plan made from a picture keeps the picture for the build', async () => {
   triageAnswer = { decision: 'go_ahead', reply: 'On it.' };
   agentScript = [(cwd) => write(cwd, 'src/page.txt', 'pills')];
   await sendAndWait(chat, 'yes');
+  assert.equal(app.chats.state.get('acme').run.outcome, 'preview');
   assert.equal(agentPrompts.length, 1);
   assert.equal(agentPrompts[0].images.length, 1, 'the picture of the plan reaches the editing AI');
   await call('POST', '/stores/acme/draft/discard', {});
   await call('DELETE', `/stores/acme/chats/${chat}`);
 });
 
-test('a bug report with a picture is answered, not built', async () => {
+test('a bug report with a picture goes to the diagnosing AI with the picture, and nothing is built', async () => {
   const chat = (await call('POST', '/stores/acme/chats', {})).body.id;
   triageAnswer = { decision: 'bug', reply: 'I will look into it.' };
+  diagnosisAnswer = { reproduced: false, cause: 'not_reproduced', summary: 'I could not see the problem.', steps: ['Open /en/cart on phone'], suspectCommit: null, adminPlace: null, fixPlan: null, recheck: null };
   const v = await sendAndWait(chat, 'this is broken', [asImage(png())]);
-  assert.equal(v.messages.at(-1).text, 'I will look into it.');
-  assert.equal(app.chats.state.get('acme').run.outcome, 'bug');
-  assert.equal(agentPrompts.length, 0);
+  assert.equal(v.messages.at(-1).kind, 'bug_report');
+  assert.equal(v.messages.at(-1).text, 'I could not see the problem.');
+  assert.equal(app.chats.state.get('acme').run.outcome, 'bug_not_reproduced');
+  assert.equal(agentPrompts.length, 1);
+  assert.equal(agentPrompts[0].images.length, 1, 'the diagnosing AI sees the picture');
+  assert.equal(app.chats.state.get('acme').draft, null);
   await call('DELETE', `/stores/acme/chats/${chat}`);
 });
 

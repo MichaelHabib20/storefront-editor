@@ -57,6 +57,25 @@ export function saveImages(dataDir, storeId, chatId, messageId, images) {
   });
 }
 
+/** Copies up to 3 of a run's screenshots next to the chat's pictures (a bug card shows them); answers [{ file, mediaType }]. */
+export function saveShots(dataDir, storeId, chatId, runId, runDir, names) {
+  const picks = names.length <= 3 ? names : [names[0], names[Math.floor(names.length / 2)], names.at(-1)];
+  const dir = dirOf(dataDir, storeId, chatId);
+  const out = [];
+  for (const name of picks) {
+    try {
+      const bytes = fs.readFileSync(path.join(runDir, name));
+      fs.mkdirSync(dir, { recursive: true });
+      const file = `shot-${runId}-${out.length + 1}.jpg`;
+      fs.writeFileSync(path.join(dir, file), bytes);
+      out.push({ file, mediaType: 'image/jpeg' });
+    } catch {
+      // a screenshot that is gone is left out
+    }
+  }
+  return out;
+}
+
 /** A saved picture for the admin page (null when the name is not one of ours or the file is gone). */
 export function readImage(dataDir, storeId, chatId, file) {
   if (!FILE.test(String(file))) return null;

@@ -9,7 +9,7 @@ import { z } from 'zod';
 
 export const SCREENSHOT_TOOL = 'mcp__editor__screenshot';
 
-const VIEWPORTS = {
+export const VIEWPORTS = {
   phone: { width: 390, height: 844, isMobile: true, deviceScaleFactor: 2 },
   desktop: { width: 1366, height: 900, isMobile: false, deviceScaleFactor: 1 },
 };
@@ -64,7 +64,7 @@ export function createBrowserPool({ launch = async () => (await import('playwrig
  * @returns {Promise<{ data: string, file: string }>} base64 JPEG and the saved file name
  */
 /** Closes the cookie banner if it covers the page (English or Arabic button). */
-async function acceptCookies(page) {
+export async function acceptCookies(page) {
   const button = page.getByRole('button', { name: /^(accept|accept all|قبول|موافق)$/i }).first();
   if (await button.isVisible({ timeout: 1000 }).catch(() => false)) await button.click({ timeout: 2000 }).catch(() => {});
 }
