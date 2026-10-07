@@ -125,7 +125,11 @@ export function createApp(config = loadConfig(), deps = {}) {
       await stores.get(id);
       return [200, await stores.check(id)];
     }],
-    ['POST', /^\/stores\/([^/]+)\/update-starter$/, async (_req, id) => [200, await stores.updateFromStarter(id)]],
+    ['POST', /^\/stores\/([^/]+)\/update-starter$/, async (_req, id) => {
+      // a running dev preview rewrites its build files while the checks read them; it restarts on the next change
+      await previews.stop(id);
+      return [200, await stores.updateFromStarter(id)];
+    }],
     ['GET', /^\/stores\/([^/]+)\/budget$/, async (_req, id) => {
       await stores.get(id);
       const settings = aiConfig.forStore(id);

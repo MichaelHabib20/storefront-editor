@@ -144,6 +144,9 @@ export function createStores(config) {
       const after = (await must('git', ['rev-parse', 'HEAD'], { cwd })).trim();
       if (after === before) return { ok: true, reason: 'up_to_date', output: '' };
 
+      // Next's generated route types describe the pages before the merge (a page that moved breaks the type check);
+      // Next writes them again on its next run
+      await fs.rm(path.join(cwd, '.next', 'types'), { recursive: true, force: true, maxRetries: 3 });
       const checked = await check(id, { full: true });
       if (!checked.ok) {
         await must('git', ['reset', '--hard', before], { cwd });
