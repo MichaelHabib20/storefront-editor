@@ -4,3 +4,4 @@ data/
 *.log
 evals/out/
 evals/data/
+data.backup-*/
