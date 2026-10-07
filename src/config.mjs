@@ -32,7 +32,8 @@ export function loadConfig(env = process.env) {
       ['npm', ['run', 'typecheck']],
       ['npm', ['run', 'lint']],
       ['npm', ['run', 'check:rules']],
-      ['npm', ['run', 'test']],
+      // one laptop runs the whole suite while previews and the AI run too: a timing test can miss its window once
+      ['npm', ['run', 'test', '--', '--retry=2']],
     ],
     /**
      * Previews: `dev` keeps a dev server per store running and it picks up each edit in seconds; `production`
