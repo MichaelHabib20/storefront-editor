@@ -228,6 +228,15 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     });
   }
 
+  /** The AI's last edits in this chat were thrown away (its session still remembers them). */
+  function markUndone(storeId, chatId) {
+    try {
+      chats.update(storeId, chatId, (c) => (c.editsUndone = true));
+    } catch {
+      // the chat was deleted meanwhile
+    }
+  }
+
   /** The owner's language for the few fixed sentences the editor says itself. */
   const said = (ownerText, en, ar) => (/[؀-ۿ]/.test(ownerText) ? ar : en);
 
@@ -565,7 +574,10 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       phase('editing', 'Changing files', { model });
 
       // the editing AI gets the job triage resolved plus the conversation, not just the owner's last few words
-      const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, chatId, 12), shared: job.shared, pictures: job.images.length });
+      // the AI's session remembers edits the editor threw away: say so once, or it believes they are still there
+      const undone = !!chats.get(storeId, chatId).editsUndone;
+      if (undone) chats.update(storeId, chatId, (c) => (c.editsUndone = false));
+      const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, chatId, 12), shared: job.shared, pictures: job.images.length, undone });
       let turn = await agentTurn(storeId, chatId, { prompt, images: job.images, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
       charge(turn.charge, true);
 
@@ -587,6 +599,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         if (sharedTouched.length) {
           setRun(storeId, { lastFailure: { round, step: 'shared parts changed', output: sharedTouched.join('\n') } });
           await resetWorkspace(cwd);
+          markUndone(storeId, chatId);
           setPending(storeId, chatId, { task: job.task, large: job.large, shared: true, images: pendingRefs });
           const question = askShared(text);
           chats.say(storeId, chatId, 'assistant', question.text, { runId, kind: 'plan', options: question.options });
@@ -638,7 +651,10 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     } catch (error) {
       outcome = error.code ?? 'error';
       log('run failed', storeId, runId, error);
-      if (!light) await resetWorkspace(cwd).catch(() => {});
+      if (!light) {
+        await resetWorkspace(cwd).catch(() => {});
+        markUndone(storeId, chatId);
+      }
       const reply =
         outcome === 'budget_stop'
           ? 'This change is bigger than one request allows. Could you ask for a smaller part of it first?'

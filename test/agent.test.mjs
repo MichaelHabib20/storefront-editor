@@ -379,3 +379,23 @@ test('approve merges the draft into the store copy; discard drops it', async () 
   assert.equal(await fs.readFile(path.join(workspace, 'src/page.txt'), 'utf8'), 'red header');
   assert.equal((await call('GET', '/stores/acme/chat')).body.draft, null);
 });
+
+test('after the editor throws the AI\'s edits away, the next edit is told so (once)', async () => {
+  // an existing shared part changed although the request was not about it: the edit is thrown away and the owner asked
+  triageAnswer = { decision: 'edit', large: false, confirm: false, shared: false, task: 'Make the bag icon a cart.', reply: 'On it.', options: [] };
+  agentScript = [(cwd) => write(cwd, 'src/shared/icons.txt', 'bag: cart-shape\n')];
+  let chat = await runToEnd('make the bag a cart on the cards only');
+  assert.equal(chat.run.outcome, 'needs_confirmation');
+
+  // "only where I asked": the AI's session still remembers its old edit — the prompt must say it is gone
+  agentScript.push((cwd) => write(cwd, 'src/page.txt', `cards only ${Date.now()}`));
+  chat = await runToEnd('No, only where I asked');
+  assert.equal(chat.run.outcome, 'preview');
+  assert.match(agentCalls[1].prompt, /thrown away by the editor/);
+
+  await call('POST', '/stores/acme/draft/discard');
+  agentScript.push((cwd) => write(cwd, 'src/page.txt', `again ${Date.now()}`));
+  await runToEnd('one more change');
+  assert.doesNotMatch(agentCalls[2].prompt, /thrown away by the editor/, 'said once');
+  await call('POST', '/stores/acme/draft/discard');
+});

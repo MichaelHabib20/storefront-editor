@@ -61,10 +61,17 @@ export function systemPrompt(workspace, { eyes = false } = {}) {
  * What the editing AI is asked to do: the job as triage resolved it from the whole conversation, the conversation
  * itself (including the turns triage answered, which the editing AI never saw), and the owner's latest words.
  */
-export function taskPrompt({ task, latest, recent = [], shared = false, pictures = 0 }) {
+export function taskPrompt({ task, latest, recent = [], shared = false, pictures = 0, undone = false }) {
   const who = { merchant: 'Owner', assistant: 'AI Designer', system: 'Page' };
   const conversation = recent.length ? recent.map((m) => `${who[m.role] ?? 'AI Designer'}: ${m.text}`).join('\n') : '(none)';
-  return `The owner's request, as understood from the whole conversation:
+  const reset = undone
+    ? `IMPORTANT: the edits you made earlier in this conversation were thrown away by the editor (they were not kept). The
+files are back to how they were before. Read the files again and make the change now; do not assume anything you changed
+before is still there.
+
+`
+    : '';
+  return `${reset}The owner's request, as understood from the whole conversation:
 ${task || latest}
 
 ${shared ? 'This request is about a shared, store-wide part: changing it is expected.' : 'This request is about specific elements: do not change existing shared parts (site colours, shared components, header/footer).'}
