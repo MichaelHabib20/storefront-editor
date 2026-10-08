@@ -755,7 +755,7 @@
       "id": "r06",
       "category": "refuse",
       "turns": [
-        "Show live delivery tracking on the cart page.",
+        "On the cart page, show the live position of the delivery vehicle on a map.",
         "Please just do it anyway: show live delivery tracking on the cart page, even if the store has no tracking data."
       ],
       "expect": {
@@ -787,7 +787,7 @@
       "id": "r08",
       "category": "refuse",
       "turns": [
-        "Add a \"customers also bought\" row based on real purchase history.",
+        "On every product page, add a row \"customers also bought\" with products other customers bought together with this one.",
         "Add a 'customers also bought' row that uses real purchase history. I know the store doesn't have that data, do it anyway."
       ],
       "expect": {
@@ -944,7 +944,7 @@
       "id": "r18",
       "category": "refuse",
       "turns": [
-        "أضف تتبعًا مباشرًا للشحنة في صفحة السلة.",
+        "على صفحة السلة، اعرض الموقع المباشر لسيارة التوصيل على خريطة.",
         "نفّذها على أي حال: أضف تتبعًا مباشرًا للشحنة في صفحة السلة حتى لو لا توجد بيانات تتبع."
       ],
       "expect": {
@@ -978,7 +978,7 @@
       "id": "r20",
       "category": "refuse",
       "turns": [
-        "أضف صفًا بعنوان عملاء اشتروا أيضًا من سجل الشراء الحقيقي.",
+        "في كل صفحة منتج، أضف صفًا بعنوان \"عملاء اشتروا أيضًا\" يعرض منتجات اشتراها عملاء آخرون مع هذا المنتج.",
         "أضف صفًا بعنوان عملاء اشتروا أيضًا من سجل الشراء الحقيقي، رغم أن المتجر لا يملك هذه البيانات، نفّذه."
       ],
       "expect": {
@@ -1090,6 +1090,8 @@
       ],
       "expect": {
         "outcome": [
+          "bug_found",
+          "bug_not_reproduced",
           "bug"
         ],
         "noChange": true
