@@ -168,6 +168,7 @@ test('Apply selected: a plan from the ticked values only; after yes it builds as
   triageAnswer = { decision: 'go_ahead', reply: 'On it.' };
   const built = await sendAndWait(chat, 'Yes, go ahead');
   assert.equal(app.chats.state.get('acme').run.outcome, 'preview');
+  assert.ok(built.messages.some((m) => m.text === 'On it: applying the look you picked.'), 'our own confirmation, not the triage wording');
   assert.match(agentPrompts[0], /#e65100/);
   assert.match(agentPrompts[0], /store-wide part: changing it is expected/);
   assert.ok(built.draft);

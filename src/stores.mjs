@@ -166,7 +166,8 @@ export function createStores(config) {
       const removed = await run('git', ['worktree', 'remove', '--force', workspaceOf(id)], { cwd: config.starterRepo });
       if (removed.code !== 0) {
         // e.g. build output git will not delete; safe now that the link is gone
-        await fs.rm(workspaceOf(id), { recursive: true, force: true, maxRetries: 3 });
+        // Windows keeps a just-stopped preview's folder busy for a moment: retry for a few seconds
+        await fs.rm(workspaceOf(id), { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
         await run('git', ['worktree', 'prune'], { cwd: config.starterRepo });
       }
       delete stores[id];

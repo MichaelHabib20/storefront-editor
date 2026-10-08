@@ -349,7 +349,9 @@ export function createSiteReader({ pool, guard, dial, timeoutMs = 90_000 }) {
     const filled = raw.buttons.filter((b) => opaque(b.bg) && farFromPage(b.bg));
     const fromButtons = tally(filled.map((b) => hex(b.bg)));
     const fromLinks = tally(raw.links.filter((c) => opaque(c)).map(hex)).filter((c) => distance(c.hex, hex(raw.text)) > 40 && distance(c.hex, page) > 40);
-    let primary = fromButtons[0] ? { hex: fromButtons[0].hex, seen: 'buttons' } : fromLinks[0] ? { hex: fromLinks[0].hex, seen: 'links' } : null;
+    // a site with only outlined buttons: their border colour
+    const fromOutlines = tally(raw.buttons.filter((b) => b.borderWidth >= 1 && opaque(b.border) && farFromPage(b.border)).map((b) => hex(b.border)));
+    const primary = fromButtons[0] ? { hex: fromButtons[0].hex, seen: 'buttons' } : fromOutlines[0] ? { hex: fromOutlines[0].hex, seen: 'buttons' } : fromLinks[0] ? { hex: fromLinks[0].hex, seen: 'links' } : null;
     if (primary) colours.primary = primary;
 
     // secondary and accent: other colours the page uses, most common / most vivid

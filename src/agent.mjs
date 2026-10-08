@@ -293,8 +293,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const message = chat.messages.find((m) => m.id === command.cardId);
       if (message?.card) message.card.used = 'applied';
     });
-    setPending(storeId, chatId, { task: applyTask(rows, card.layout), large: false, shared: true, images: [] });
     const arabic = /[؀-ۿ]/.test(text);
+    // the confirmation is ours, not the triage's: it must not name a different website
+    setPending(storeId, chatId, { task: applyTask(rows, card.layout), large: false, shared: true, images: [], ack: arabic ? 'جارٍ تطبيق الشكل الذي اخترته.' : 'On it: applying the look you picked.' });
     chats.say(storeId, chatId, 'assistant', planText(rows, arabic), { runId, kind: 'plan', options: arabic ? ['نعم، تابع', 'لا، ألغِ'] : ['Yes, go ahead', 'No, cancel'] });
     return 'plan';
   }
@@ -420,7 +421,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       let ack = null;
       if (decision.decision === 'go_ahead' && pending) {
         job = { task: pending.task, large: pending.large, shared: !!pending.shared, images: [...loadImages(config.dataDir, storeId, chatId, pending.images), ...images].slice(0, 3) };
-        ack = decision.reply || 'On it.';
+        ack = pending.ack || decision.reply || 'On it.';
       } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
         // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
         setPending(storeId, chatId, { task: decision.task, large: decision.large, shared: !!decision.shared, images: savedRefs });
@@ -507,7 +508,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           if (!(error instanceof BudgetError) || error.code !== 'busy') throw error;
           const other = chats.state.get(storeId).run;
           const otherTitle = other ? chats.get(storeId, other.chatId).title : '';
-          setPending(storeId, chatId, { task: job.task, large: job.large, shared: job.shared, images: pendingRefs });
+          setPending(storeId, chatId, { task: job.task, large: job.large, shared: job.shared, images: pendingRefs, ...(decision.decision === 'go_ahead' && pending?.ack ? { ack: pending.ack } : {}) });
           chats.say(
             storeId,
             chatId,
