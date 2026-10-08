@@ -25,6 +25,19 @@ function cardOf(kind, card, reportStatus) {
     const report = card?.reportId ? reportStatus(card.reportId) : null;
     return { refuseKind: REFUSE_KINDS.includes(card?.refuseKind) ? card.refuseKind : 'unsafe', ...(report ? { report: { status: report } } : {}) };
   }
+  if (kind === 'style_card' && card) {
+    const rows = (Array.isArray(card.rows) ? card.rows : []).slice(0, 20).map((r) => ({
+      id: String(r.id ?? '').slice(0, 40),
+      group: ['colour', 'font', 'size', 'shape', 'spacing', 'layout'].includes(r.group) ? r.group : 'shape',
+      label: String(r.label ?? '').slice(0, 40),
+      theirs: String(r.theirs ?? '').slice(0, 60),
+      ours: r.ours === null || r.ours === undefined ? null : String(r.ours).slice(0, 60),
+    }));
+    const layout = Array.isArray(card.layout)
+      ? card.layout.slice(0, 30).map((s) => ({ type: String(s.type ?? 'other').slice(0, 30), columns: { desktop: Number(s.columns?.desktop) || 1, phone: Number(s.columns?.phone) || 1 } }))
+      : null;
+    return { host: String(card.host ?? '').slice(0, 100), mode: card.mode === 'style_layout' ? 'style_layout' : 'style', rows, layout, used: card.used === 'applied' || card.used === 'cancelled' ? card.used : null };
+  }
   if (kind === 'bug_report' && card) {
     const cause = CAUSES.includes(card.cause) ? card.cause : 'not_reproduced';
     const open = !card.used;
@@ -75,7 +88,9 @@ export function presentChat(chat, { state = {}, titleOf = () => '', reportStatus
   const storeRun = state.run && typeof state.run === 'object' ? state.run : null;
   const here = !!storeRun && storeRun.chatId === chat.id;
   const light = chat.lightRun && typeof chat.lightRun === 'object' ? chat.lightRun : null;
-  const mine = here ? storeRun : light;
+  // this chat's run: the one still working, else the newest (a finished build and a later run that only talked)
+  const candidates = [here ? storeRun : null, light].filter(Boolean);
+  const mine = candidates.find((r) => r.state !== 'done') ?? candidates.sort((x, y) => String(y.startedAt ?? '').localeCompare(String(x.startedAt ?? '')))[0] ?? null;
   const status = mine ? STATES[mine.state] ?? 'editing' : null;
   const otherBuilding = storeRun && !here && storeRun.state !== 'done' ? storeRun.chatId : null;
   return {

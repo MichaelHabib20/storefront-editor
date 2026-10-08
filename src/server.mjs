@@ -39,6 +39,8 @@ import { ChangeError, createAgentRunner } from './agent.mjs';
 import { loadAiConfig } from './ai-config.mjs';
 import { ChatError, MAIN_CHAT, createChats } from './chats.mjs';
 import { createDiagnoser } from './diagnose.mjs';
+import { createFetchGuard, ownHostsOf } from './fetch-guard.mjs';
+import { createSiteReader } from './site-reader.mjs';
 import { ImageError, readImage } from './images.mjs';
 import { ReportError, createReports } from './reports.mjs';
 import { loadConfig } from './config.mjs';
@@ -141,7 +143,17 @@ export function createApp(config = loadConfig(), deps = {}) {
     onFixed: (report) => chats.note(report.storeId, report.chatId, 'system', `Our team fixed the problem you reported: ${report.summary}`),
   });
   const diagnoser = browsers ? createDiagnoser({ config, stores, previews, chats, reports, browsers, ...(deps.query ? { query: deps.query } : {}), log }) : null;
-  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, browsers, diagnoser, reports, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log });
+  // reading other people's websites: its own browser (every page goes through the guard proxy), only for public addresses
+  const siteReader =
+    deps.siteReader !== undefined
+      ? deps.siteReader
+      : browsers
+        ? createSiteReader({
+            pool: createBrowserPool({ launch: async () => (await import('playwright')).chromium.launch({ proxy: { server: 'per-context' }, args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] }) }),
+            guard: createFetchGuard({ ownHosts: ownHostsOf(config) }),
+          })
+        : null;
+  const runner = createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, browsers, diagnoser, reports, siteReader, files: aiConfig.files, ...(deps.query ? { query: deps.query } : {}), log });
   const publisher = createPublisher({ config, stores, chats, isBusy: (id) => ledger.status(id).busy, log });
 
   /** The publish part of the chat view (null when the store has no website to publish to). */
@@ -223,8 +235,8 @@ export function createApp(config = loadConfig(), deps = {}) {
       return [200, image.bytes, image.mediaType];
     }],
     ['POST', /^\/stores\/([^/]+)\/chats\/([^/]+)\/messages$/, async (req, id, chatId) => {
-      const { text, images, command, cardId, url, selection } = await body(req, PICTURE_BODY_LIMIT);
-      const { runId } = await runner.send(id, text, { chatId, images, command, cardId, url, selection });
+      const { text, images, command, cardId, url, mode, selected } = await body(req, PICTURE_BODY_LIMIT);
+      const { runId } = await runner.send(id, text, { chatId, images, command, cardId, url, mode, selected });
       return [202, { runId }];
     }],
     ['POST', /^\/stores\/([^/]+)\/messages$/, async (req, id) => {
@@ -381,14 +393,15 @@ export function createApp(config = loadConfig(), deps = {}) {
     }
   });
 
-  return { server, stores, previews, aiConfig, ledger, chats, runner, publisher, browsers, reports, diagnoser };
+  return { server, stores, previews, aiConfig, ledger, chats, runner, publisher, browsers, reports, diagnoser, siteReader };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const config = loadConfig();
-  const { server, previews, browsers } = createApp(config);
+  const { server, previews, browsers, siteReader } = createApp(config);
   server.listen(config.port, '127.0.0.1', () => console.log(`storefront-editor on http://127.0.0.1:${config.port}`));
   const shutdown = async () => {
+    await siteReader?.close?.();
     await browsers?.close();
     await previews.stopAll();
     process.exit(0);

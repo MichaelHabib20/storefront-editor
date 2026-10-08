@@ -17,7 +17,8 @@ import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
 import { must, run } from './run.mjs';
 import { BudgetError } from './ledger.mjs';
 import fs from 'node:fs';
-import { checkImages, loadImages, promptWithImages, saveImages } from './images.mjs';
+import { checkImages, loadImages, promptWithImages, saveImages, saveShots } from './images.mjs';
+import { chosenRows, applyTask, cardRows, planText } from './style-card.mjs';
 import { MAIN_CHAT, NEW_CHAT_TITLE, cleanTitle } from './chats.mjs';
 
 const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
@@ -65,7 +66,7 @@ export function askShared(ownerText) {
   };
 }
 
-export function createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, query = sdkQuery, files, browsers = null, diagnoser = null, reports = null, log = () => {} }) {
+export function createAgentRunner({ config, stores, previews, ledger, aiConfig, chats, triage, query = sdkQuery, files, browsers = null, diagnoser = null, reports = null, siteReader = null, log = () => {} }) {
   const policy = createFilePolicy(files);
   const generated = files.generated ?? [];
   const git = (args, cwd) => must('git', args, { cwd });
@@ -230,6 +231,74 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
   /** The owner's language for the few fixed sentences the editor says itself. */
   const said = (ownerText, en, ar) => (/[؀-ۿ]/.test(ownerText) ? ar : en);
 
+  /** Commands that make no AI call: they never hold the store's build slot. */
+  const NO_COST = ['read_website', 'style_cancel', 'apply_style'];
+
+  /** The style card a button was pressed on (null when it is not there or was used already). */
+  function styleCardOf(storeId, chatId, cardId) {
+    const message = chats.get(storeId, chatId).messages.find((m) => m.id === cardId && m.kind === 'style_card');
+    return message?.card && !message.card.used ? message.card : null;
+  }
+
+  /** "Read a website": the look of a public page as a card the owner ticks. No AI, no cost. */
+  async function readWebsite({ storeId, chatId, runId, text, command, cwd }) {
+    const step = (line) => addLightStep(storeId, chatId, line);
+    const fail = (reply, outcome) => {
+      chats.say(storeId, chatId, 'assistant', reply, { runId });
+      return outcome;
+    };
+    if (!siteReader) return fail(said(text, 'I cannot read websites right now.', 'لا أستطيع قراءة المواقع الآن.'), 'site_reader_off');
+    step('Opening the website');
+    let seen;
+    try {
+      seen = await siteReader.read({ url: command.url, mode: command.mode === 'style_layout' ? 'style_layout' : 'style' });
+    } catch (error) {
+      log('read website failed', storeId, runId, error.code ?? error.message);
+      if (error.code === 'url_refused') return fail(said(text, error.message, 'لا يمكن قراءة هذا العنوان. أعطني رابط موقع عام يبدأ بـ https://.'), 'url_refused');
+      if (error.code === 'unreachable' || error.code === 'timeout') return fail(said(text, error.message, 'تعذّر فتح هذا الموقع أو أنه استغرق وقتًا طويلًا.'), 'site_unreadable');
+      return fail(said(text, 'I could not read that website.', 'لم أتمكن من قراءة هذا الموقع.'), 'site_unreadable');
+    }
+    step('Reading its colours, fonts and shapes');
+    const rows = cardRows(seen.style, command.mode === 'style_layout' ? seen.layout : null, cwd);
+    if (!rows.length) return fail(said(text, 'I could not read the look of that website.', 'لم أتمكن من قراءة شكل هذا الموقع.'), 'site_unreadable');
+    let images = [];
+    if (seen.screenshot) {
+      const runDir = path.join(config.dataDir, 'runs', runId);
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, 'site.jpg'), seen.screenshot);
+      images = saveShots(config.dataDir, storeId, chatId, runId, runDir, ['site.jpg']);
+    }
+    chats.say(storeId, chatId, 'assistant', said(text, `This is the look I read from ${seen.host}. Tick what you would like to use.`, `هذا هو الشكل الذي قرأته من ${seen.host}. اختر ما تريد استخدامه.`), {
+      runId,
+      kind: 'style_card',
+      card: { host: seen.host, mode: command.mode === 'style_layout' ? 'style_layout' : 'style', rows, layout: command.mode === 'style_layout' ? seen.layout : null, used: null },
+      ...(images.length ? { images } : {}),
+    });
+    return 'style_card';
+  }
+
+  /** "Apply selected": the ticked rows become a plan the owner confirms (a site-wide edit, built as usual after yes). */
+  function applyStyle({ storeId, chatId, runId, text, command }) {
+    const card = styleCardOf(storeId, chatId, command.cardId);
+    if (!card) {
+      chats.say(storeId, chatId, 'assistant', said(text, 'That suggestion is not available any more.', 'هذا الاقتراح لم يعد متاحًا.'), { runId });
+      return 'unclear';
+    }
+    const rows = chosenRows(card, command.selected);
+    if (!rows.length) {
+      chats.say(storeId, chatId, 'assistant', said(text, 'Tick at least one item first.', 'اختر عنصرًا واحدًا على الأقل أولًا.'), { runId });
+      return 'unclear';
+    }
+    chats.update(storeId, chatId, (chat) => {
+      const message = chat.messages.find((m) => m.id === command.cardId);
+      if (message?.card) message.card.used = 'applied';
+    });
+    setPending(storeId, chatId, { task: applyTask(rows, card.layout), large: false, shared: true, images: [] });
+    const arabic = /[؀-ۿ]/.test(text);
+    chats.say(storeId, chatId, 'assistant', planText(rows, arabic), { runId, kind: 'plan', options: arabic ? ['نعم، تابع', 'لا، ألغِ'] : ['Yes, go ahead', 'No, cancel'] });
+    return 'plan';
+  }
+
   /** The bug card a button was pressed on (null when it is not there, used already, or has nothing to act on). */
   function cardOf(storeId, chatId, cardId) {
     const message = chats.get(storeId, chatId).messages.find((m) => m.id === cardId && m.kind === 'bug_report');
@@ -312,6 +381,26 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     };
 
     try {
+      if (command?.name === 'read_website') {
+        outcome = await readWebsite({ storeId, chatId, runId, text, command, cwd });
+        return;
+      }
+      if (command?.name === 'apply_style') {
+        outcome = applyStyle({ storeId, chatId, runId, text, command });
+        return;
+      }
+      if (command?.name === 'style_cancel') {
+        const card = styleCardOf(storeId, chatId, command.cardId);
+        if (card) {
+          chats.update(storeId, chatId, (chat) => {
+            const message = chat.messages.find((m) => m.id === command.cardId);
+            if (message?.card) message.card.used = 'cancelled';
+          });
+        }
+        chats.say(storeId, chatId, 'assistant', said(text, 'OK, your store stays as it is.', 'حسنًا، يبقى متجرك كما هو.'), { runId });
+        outcome = 'style_cancelled';
+        return;
+      }
       const pending = chats.get(storeId, chatId).pending ?? null;
       // a button of the page (Fix a bug, Undo the change, Fix it instead) says what it wants: no triage for those
       const card = command && command.name !== 'fix_bug' ? cardOf(storeId, chatId, command.cardId) : null;
@@ -567,7 +656,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
      * `out_of_budget` before anything starts. While another chat holds the store's build, the message still gets
      * an answer (a question, a plan); a build waits and the chat says which chat is building.
      */
-    async send(storeId, text, { chatId = MAIN_CHAT, images: rawImages, command: rawCommand, cardId } = {}) {
+    async send(storeId, text, { chatId = MAIN_CHAT, images: rawImages, command: rawCommand, cardId, url, mode, selected } = {}) {
       await stores.get(storeId);
       undoGuard(storeId);
       if (typeof text !== 'string' || !text.trim()) throw new ChangeError('empty_message', 'The message is empty.');
@@ -578,14 +667,21 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const building = chats.state.get(storeId).run;
       let reservation = null;
       let light = false;
+      const noCost = NO_COST.includes(rawCommand);
       try {
+        // commands that call no AI never hold the build slot
+        if (noCost) throw new BudgetError('busy', 'no reservation needed');
         reservation = ledger.reserve(storeId);
       } catch (error) {
+        if (noCost) {
+          light = true;
+        } else {
         const elsewhere = building && building.state !== 'done' && building.chatId !== chatId;
         if (!(error instanceof BudgetError) || error.code !== 'busy' || !elsewhere) throw error;
         const current = ledger.status(storeId);
         if (current.blocked) throw new BudgetError('out_of_budget', 'The AI budget for this month is used up.', current);
         light = true;
+        }
       }
       const runId = randomUUID();
       const savedRefs = saveImages(config.dataDir, storeId, chatId, runId, images);
@@ -603,7 +699,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           state.run = { id: runId, chatId, state: 'triage', startedAt, outcome: null, round: 0, steps: [{ at: startedAt, kind: 'phase', text: 'Reading your request' }], updatedAt: startedAt };
         });
       }
-      const command = ['fix_bug', 'bug_undo', 'bug_fix'].includes(rawCommand) ? { name: rawCommand, cardId: typeof cardId === 'string' ? cardId : null } : null;
+      const command = ['fix_bug', 'bug_undo', 'bug_fix', ...NO_COST].includes(rawCommand)
+        ? { name: rawCommand, cardId: typeof cardId === 'string' ? cardId : null, url: typeof url === 'string' ? url.slice(0, 2048) : '', mode: mode === 'style_layout' ? 'style_layout' : 'style', selected: Array.isArray(selected) ? selected.slice(0, 30) : [] }
+        : null;
       const done = work(storeId, chatId, runId, text.trim(), reservation, light, images, savedRefs, command);
       return { runId, done };
     },
