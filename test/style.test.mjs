@@ -46,7 +46,9 @@ function fakeQuery({ prompt, options }) {
   return (async function* () {
     agentPrompts.push(typeof prompt === 'string' ? prompt : '(stream)');
     yield { type: 'system', subtype: 'init', session_id: 's1' };
-    await write(options.cwd, 'src/app/globals.css', ':root { --color-bg: #ffffff; --color-text: #222222; --color-primary: #e65100; }\n');
+    // step 1 (the button token) keeps the look; the look itself changes the colour
+    const token = typeof prompt === 'string' && /their own colour design token/.test(prompt);
+    await write(options.cwd, 'src/app/globals.css', `:root { --color-bg: #fafafa; --color-text: #000000; --color-primary: ${token ? '#000000' : '#e65100'}; --color-on-primary: #ffffff; }\n`);
     yield { type: 'result', subtype: 'success', result: 'Done.', total_cost_usd: 0.1, modelUsage: {}, session_id: 's1' };
   })();
 }
@@ -148,35 +150,63 @@ test('a blocked address is refused with a plain message and no card', async () =
   assert.equal(app.chats.get('acme', chat).lightRun.outcome, 'url_refused');
 });
 
-test('Apply selected: a plan from the ticked values only; after yes it builds as a site-wide change', async () => {
+test('Apply a primary colour on a store whose buttons have no colour of their own: first the button token (looks the same, approved), then the look', async () => {
   const chat = await newChat();
   await sendAndWait(chat, 'https://shop.example', { command: 'read_website', url: 'https://shop.example', mode: 'style' });
   const cardId = app.chats.get('acme', chat).messages.findLast((m) => m.kind === 'style_card').id;
   const planned = await sendAndWait(chat, 'Apply selected', { command: 'apply_style', cardId, selected: ['colour_primary', 'font_heading', 'made_up_row'] });
   const plan = planned.messages.at(-1);
   assert.equal(plan.kind, 'plan');
+  assert.match(plan.text, /two steps/);
   assert.match(plan.text, /#e65100/);
   assert.match(plan.text, /Montserrat/);
   assert.deepEqual(plan.options, ['Yes, go ahead', 'No, cancel']);
   const pending = app.chats.get('acme', chat).pending;
-  assert.equal(pending.shared, true);
-  assert.match(pending.task, /primary colour .*#e65100/);
-  assert.match(pending.task, /Google Font "Montserrat"/);
-  assert.ok(!/Inter|#222222|airy|24px/.test(pending.task), 'only the ticked rows');
+  assert.match(pending.task, /their own colour design token, WITHOUT changing how anything looks/);
+  assert.match(pending.then.task, /primary colour .*#e65100/);
+  assert.match(pending.then.task, /Google Font "Montserrat"/);
+  assert.ok(!/Inter|#222222|airy|24px/.test(pending.then.task), 'only the ticked rows');
   assert.equal(planned.messages.findLast((m) => m.kind === 'style_card').card.used, 'applied');
 
+  // step 1: the button token
   triageAnswer = { decision: 'go_ahead', reply: 'On it.' };
+  const first = await sendAndWait(chat, 'Yes, go ahead');
+  assert.equal(app.chats.state.get('acme').run.outcome, 'preview');
+  assert.match(agentPrompts[0], /their own colour design token/);
+  assert.ok(first.messages.some((m) => m.text === 'On it: giving your main buttons a colour of their own (nothing will look different).'));
+  assert.match(first.messages.at(-1).text, /Step 1 is ready/);
+  assert.ok(first.draft);
+
+  // step 2 waits for Approve
+  const early = await sendAndWait(chat, 'Yes, go ahead');
+  assert.match(early.messages.at(-1).text, /press Approve at the top first/);
+  assert.equal(agentPrompts.length, 1, 'nothing built');
+  assert.equal((await call('POST', '/stores/acme/draft/approve', { chatId: chat })).status, 200);
+
+  // step 2: the look, on its own draft
   const built = await sendAndWait(chat, 'Yes, go ahead');
   assert.equal(app.chats.state.get('acme').run.outcome, 'preview');
+  assert.equal(agentPrompts.length, 2);
+  assert.match(agentPrompts[1], /#e65100/);
+  assert.match(agentPrompts[1], /store-wide part: changing it is expected/);
   assert.ok(built.messages.some((m) => m.text === 'On it: applying the look you picked.'), 'our own confirmation, not the triage wording');
-  assert.match(agentPrompts[0], /#e65100/);
-  assert.match(agentPrompts[0], /store-wide part: changing it is expected/);
-  assert.ok(built.draft);
+  assert.equal(app.chats.get('acme', chat).pending, null);
   await call('POST', '/stores/acme/draft/discard', {});
 
   // the card cannot be applied twice
   const again = await sendAndWait(chat, 'Apply selected', { command: 'apply_style', cardId, selected: ['colour_primary'] });
   assert.match(again.messages.at(-1).text, /not available any more/);
+});
+
+test('a store whose buttons already have their own colour gets the look in one step', async () => {
+  // the previous test approved the button token into the store
+  const chat = await newChat();
+  await sendAndWait(chat, 'https://shop.example', { command: 'read_website', url: 'https://shop.example', mode: 'style' });
+  const cardId = app.chats.get('acme', chat).messages.findLast((m) => m.kind === 'style_card').id;
+  const planned = await sendAndWait(chat, 'Apply selected', { command: 'apply_style', cardId, selected: ['colour_primary'] });
+  assert.ok(!/two steps/.test(planned.messages.at(-1).text));
+  assert.match(app.chats.get('acme', chat).pending.task, /#e65100/);
+  assert.equal(app.chats.get('acme', chat).pending.then, undefined);
 });
 
 test('Apply with nothing ticked asks to tick something; Cancel keeps the store as it is', async () => {

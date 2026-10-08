@@ -118,3 +118,27 @@ export function applyTask(rows, layout) {
   }
   return parts.join('\n\n');
 }
+
+/**
+ * Whether the store's main buttons have a colour token of their own (`--color-primary` in globals.css). Without one,
+ * a "primary colour" cannot go into the tokens alone (the starter paints its main buttons with the text colour).
+ */
+export function hasButtonToken(workspace) {
+  try {
+    const css = fs.readFileSync(path.join(workspace, 'src/app/globals.css'), 'utf8');
+    return /--color-primary\s*:/.test(/:root\s*{([^}]*)}/.exec(css)?.[1] ?? '');
+  } catch {
+    return false;
+  }
+}
+
+/** The one-time job before a primary colour: the main buttons get their own token, with nothing looking different. */
+export function buttonTokenTask() {
+  return `Give the store's main buttons their own colour design token, WITHOUT changing how anything looks:
+- In the :root of src/app/globals.css add \`--color-primary\` and \`--color-on-primary\`, set to exactly the colours the
+  filled main buttons use today (their background and their text colour).
+- Change the filled main buttons (for example "Add to cart", "Checkout", the main call-to-action buttons) to use
+  var(--color-primary) for their background and var(--color-on-primary) for their text, instead of the text colour.
+- Do not change any colour value, any other element, or plain text colours. After this change the store must look exactly
+  the same as before.`;
+}

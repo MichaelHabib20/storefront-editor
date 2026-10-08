@@ -18,7 +18,7 @@ import { must, run } from './run.mjs';
 import { BudgetError } from './ledger.mjs';
 import fs from 'node:fs';
 import { checkImages, loadImages, promptWithImages, saveImages, saveShots } from './images.mjs';
-import { chosenRows, applyTask, cardRows, planText } from './style-card.mjs';
+import { applyTask, buttonTokenTask, cardRows, chosenRows, hasButtonToken, planText } from './style-card.mjs';
 import { MAIN_CHAT, NEW_CHAT_TITLE, cleanTitle } from './chats.mjs';
 
 const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
@@ -295,7 +295,29 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     });
     const arabic = /[؀-ۿ]/.test(text);
     // the confirmation is ours, not the triage's: it must not name a different website
-    setPending(storeId, chatId, { task: applyTask(rows, card.layout), large: false, shared: true, images: [], ack: arabic ? 'جارٍ تطبيق الشكل الذي اخترته.' : 'On it: applying the look you picked.' });
+    const apply = { task: applyTask(rows, card.layout), large: false, shared: true, images: [], ack: arabic ? 'جارٍ تطبيق الشكل الذي اخترته.' : 'On it: applying the look you picked.' };
+    if (rows.some((r) => r.id === 'colour_primary') && !hasButtonToken(stores.workspaceOf(storeId))) {
+      // the main buttons have no colour of their own yet: first give them one (nothing looks different), then apply
+      setPending(storeId, chatId, {
+        task: buttonTokenTask(),
+        large: true,
+        shared: true,
+        images: [],
+        ack: arabic ? 'جارٍ إعطاء الأزرار الرئيسية لونًا خاصًا بها (دون أي تغيير في الشكل).' : 'On it: giving your main buttons a colour of their own (nothing will look different).',
+        then: { ...apply, afterApprove: true },
+      });
+      chats.say(
+        storeId,
+        chatId,
+        'assistant',
+        arabic
+          ? `أزرارك الرئيسية تستخدم لون النص، لذلك أحتاج خطوتين. أولًا: أعطي الأزرار لونًا خاصًا بها (لن يتغير أي شيء في الشكل)، ثم توافق عليه. ثانيًا: ${planText(rows, true)}`
+          : `Your main buttons use the text colour, so this takes two steps. First, I give the buttons a colour of their own (nothing will look different) and you approve it. Then: ${planText(rows, false)}`,
+        { runId, kind: 'plan', options: arabic ? ['نعم، تابع', 'لا، ألغِ'] : ['Yes, go ahead', 'No, cancel'] },
+      );
+      return 'plan';
+    }
+    setPending(storeId, chatId, apply);
     chats.say(storeId, chatId, 'assistant', planText(rows, arabic), { runId, kind: 'plan', options: arabic ? ['نعم، تابع', 'لا، ألغِ'] : ['Yes, go ahead', 'No, cancel'] });
     return 'plan';
   }
@@ -419,8 +441,13 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const pendingRefs = decision.decision === 'go_ahead' ? [...(pending?.images ?? []), ...savedRefs].slice(0, 3) : savedRefs;
       let job = null;
       let ack = null;
-      if (decision.decision === 'go_ahead' && pending) {
-        job = { task: pending.task, large: pending.large, shared: !!pending.shared, images: [...loadImages(config.dataDir, storeId, chatId, pending.images), ...images].slice(0, 3) };
+      if (decision.decision === 'go_ahead' && pending?.afterApprove && chats.state.get(storeId).draft) {
+        // the step before must be approved first, so this change stands on its own
+        chats.say(storeId, chatId, 'assistant', said(text, 'Please press Approve at the top first, then say "yes" and I will apply the look.', 'اضغط "موافقة" في الأعلى أولًا، ثم قل "نعم" وسأطبّق الشكل.'), { runId, kind: 'plan', options: said(text, ['Yes, go ahead'], ['نعم، تابع']) });
+        outcome = 'plan';
+        return;
+      } else if (decision.decision === 'go_ahead' && pending) {
+        job = { task: pending.task, large: pending.large, shared: !!pending.shared, images: [...loadImages(config.dataDir, storeId, chatId, pending.images), ...images].slice(0, 3), then: pending.then ?? null };
         ack = pending.ack || decision.reply || 'On it.';
       } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
         // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
@@ -585,6 +612,11 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
             chats.say(storeId, chatId, 'assistant', turn.text || 'Done. Have a look at the preview.', { runId, preview: preview.url });
             outcome = 'preview';
             if (job.recheck) await announceRecheck(storeId, chatId, runId, text, job.recheck);
+            if (job.then) {
+              // the first of two steps is ready: the second waits for the owner's Approve and "yes"
+              setPending(storeId, chatId, job.then);
+              chats.say(storeId, chatId, 'assistant', said(text, 'Step 1 is ready: your main buttons now have a colour of their own, and the store looks the same. Press Approve at the top, then say "yes" and I will apply the look.', 'الخطوة الأولى جاهزة: أصبح للأزرار الرئيسية لون خاص بها، والمتجر يبدو كما هو. اضغط "موافقة" في الأعلى، ثم قل "نعم" وسأطبّق الشكل.'), { runId, kind: 'plan', options: said(text, ['Yes, go ahead'], ['نعم، تابع']) });
+            }
             return;
           } catch (error) {
             if (!(error instanceof PreviewError) || error.code !== 'build_failed') {
