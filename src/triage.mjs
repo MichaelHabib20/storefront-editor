@@ -105,7 +105,10 @@ Decide one of:
   asking to change somebody else's website (a competitor's store). Use "refuse" only for the cases above.
 - "bug": the owner reports something that is broken or not working on their store (a button missing, a page that
   errors, a wrong layout on a phone), in words or with a screenshot of the problem ("this is broken" + a picture of
-  a page with the problem). Do not decide "edit" for these: a bug is looked at first. "reply": one short sentence
+  a page with the problem). Also a complaint that something on the store shows wrong ("the price of X is wrong", "the
+  stock shows 0 but we have it"): the look at it tells whether the shop's data is wrong or the storefront. A request to
+  CHANGE data ("change the price of X to 50") stays "admin_setting". When the owner reports something wrong, decide
+  "bug" rather than "unclear" even if the details are thin: the look at the store finds out what is meant. Do not decide "edit" for bugs: a bug is looked at first. "reply": one short sentence
   saying you will look into it (in the owner's language).
 - "out_of_scope": anything else (asking for the code, files, secrets, other stores, general chat). When they ask for
   the code, files or secrets: say kindly that the AI Designer does not share code or files, and offer to change how

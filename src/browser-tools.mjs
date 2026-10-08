@@ -39,7 +39,23 @@ function shortPath(url, origin) {
   }
 }
 
+/**
+ * Waits until the page has loaded and gone quiet (a dev preview compiles a page on its first visit and only then
+ * hydrates it: a click before that does nothing), then a moment for it to react.
+ */
+async function settle(page, networkMs, activity) {
+  await page.waitForLoadState('load', { timeout: 20_000 }).catch(() => {});
+  // quiet = no request in flight for 700 ms (Playwright's "network idle" gives up too early on a slow server action)
+  const until = Date.now() + networkMs;
+  while (Date.now() < until && (activity.inflight > 0 || Date.now() - activity.last < 700)) await page.waitForTimeout(100);
+}
+
 function locate(page, step, { forFill = false } = {}) {
+  // a link and a button are the same thing to a customer (the store shows one or the other by state): either matches
+  const alike = { button: 'link', link: 'button' };
+  if (step.role && step.name && alike[step.role]) {
+    return page.getByRole(step.role, { name: looseName(step.name) }).or(page.getByRole(alike[step.role], { name: looseName(step.name) })).first();
+  }
   if (step.role && step.name) return page.getByRole(step.role, { name: looseName(step.name) }).first();
   if (step.role) return page.getByRole(step.role).first();
   const label = step.name ?? step.text;
@@ -85,6 +101,17 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
       if (/ERR_ABORTED/.test(r.failure()?.errorText ?? '') || failedRequests.length >= MAX_LIST) return;
       failedRequests.push({ method: r.method(), path: shortPath(r.url(), origin), status: 0 });
     });
+    const activity = { inflight: 0, last: Date.now() };
+    page.on('request', () => {
+      activity.inflight += 1;
+      activity.last = Date.now();
+    });
+    const done = () => {
+      activity.inflight = Math.max(0, activity.inflight - 1);
+      activity.last = Date.now();
+    };
+    page.on('requestfinished', done);
+    page.on('requestfailed', done);
     // only the store's own preview: a page that sends the browser to another site is stopped there (204: the page
     // stays where it is)
     let leftTheStore = false;
@@ -98,8 +125,7 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
     });
 
     await page.goto(new URL(safe, baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    await page.waitForLoadState('load', { timeout: 20_000 }).catch(() => {});
-    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+    await settle(page, 15_000, activity);
     await acceptCookies(page);
 
     const results = [];
@@ -111,6 +137,7 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
           const target = safePreviewPath(step.path);
           if (!target) throw new Error('Use a path on the store that starts with "/".');
           await page.goto(new URL(target, baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60_000 });
+          await settle(page, 10_000, activity);
         } else if (step.do === 'wait') {
           await page.waitForTimeout(Math.min(Math.max(Number(step.ms) || 500, 0), 5000));
         } else if (step.do === 'login') {
@@ -135,7 +162,7 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
             } else await target.click({ timeout: 8000 });
           } else await target.fill(String(step.value ?? ''), { timeout: 8000 });
         } else throw new Error(`Unknown step "${step.do}".`);
-        if (result.ok) await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+        if (result.ok) await settle(page, 8000, activity);
         if (result.ok && leftTheStore) {
           result.ok = false;
           result.reason = 'That leaves the store preview, so it was not opened.';

@@ -91,6 +91,15 @@ test('the phone and the desktop screen differ (the Checkout link is hidden on th
   assert.equal(await visible('phone'), false);
 });
 
+test('a link and a button count as the same control (the store shows one or the other)', async () => {
+  const asButton = await browse(pool, { baseUrl: base, path: '/en/cart', viewport: 'desktop', steps: [], expectVisible: { role: 'button', name: 'Checkout' } });
+  assert.equal(asButton.visible, true, 'asked for a button, the page has a link');
+  const asLink = await browse(pool, { baseUrl: base, path: '/en/cart', viewport: 'desktop', steps: [], expectVisible: { role: 'link', name: 'Add one' } });
+  assert.equal(asLink.visible, true, 'asked for a link, the page has a button');
+  const hidden = await browse(pool, { baseUrl: base, path: '/en/cart', viewport: 'phone', steps: [], expectVisible: { role: 'button', name: 'Checkout' } });
+  assert.equal(hidden.visible, false, 'hidden on the phone either way');
+});
+
 test('act: each step answers ok or failed with the reason, and stops at the first failure', async () => {
   const seen = await browse(pool, {
     baseUrl: base,
