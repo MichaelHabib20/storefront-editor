@@ -9,7 +9,8 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
-import { explainPrompt, fixPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
+import { explainPrompt, fixPrompt, lookPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
+import { missingLooks } from './looks.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
 import { cleanOptions } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
@@ -642,11 +643,25 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       let turn = await agentTurn(storeId, chatId, { prompt, images: job.images, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
       charge(turn.charge, true);
 
+      let looked = false;
       for (let round = 0; ; round++) {
         if (turn.subtype === 'error_max_budget_usd') throw new ChangeError('budget_stop', 'This request needed more than one request may spend.');
         if (turn.subtype !== 'success') throw new ChangeError('agent_failed', `The agent stopped (${turn.subtype}).`);
 
-        const changed = await changedFiles(cwd);
+        let changed = await changedFiles(cwd);
+        // it must have seen its change on phone and desktop: if not, once, it looks now (and fixes what it sees)
+        if (eyes && !looked && changed.length) {
+          looked = true;
+          const missing = await missingLooks(cwd, changed, path.join(config.dataDir, 'runs', runId));
+          if (missing.length) {
+            phase('editing', 'Looking at the change on phone and desktop', { model });
+            turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
+            charge(turn.charge, true);
+            if (turn.subtype === 'error_max_budget_usd') throw new ChangeError('budget_stop', 'This request needed more than one request may spend.');
+            if (turn.subtype !== 'success') throw new ChangeError('agent_failed', `The agent stopped (${turn.subtype}).`);
+            changed = await changedFiles(cwd);
+          }
+        }
         const outside = changed.filter((file) => !policy.canEdit(file));
         if (outside.length) throw new ChangeError('outside_allowed_files', `Changed files the editor does not allow: ${outside.join(', ')}`);
         if (changed.length === 0) {

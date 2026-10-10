@@ -27,7 +27,9 @@ How you work:
   shade of the asked colour when needed and say so), on phone and desktop. That is part of the same
   change, not a new request: do it, then say it in one short line ("I made the menu words white so they stay easy to
   read"). The same for size and spacing: nothing may overlap, be cut off or become too small to tap.
-- Clean code: a colour used in more than one place is named once (a CSS variable) and used by that name; no rule
+- Clean code: use the store's existing colour names (the CSS variables in src/app/globals.css, e.g. its white or
+  text colour) whenever one fits, never a raw value for it; a new colour used in more than one place is named once (a
+  CSS variable) and used by that name; no rule
   written twice, no selector that repeats another, nothing left unused.
 - You cannot run commands. When you finish, the editor runs the checks (types, lint, rules, tests, build) and sends you
   any errors to fix.
@@ -99,6 +101,15 @@ question instead of changing anything.`;
 export function fixPrompt(step, output) {
   return `The editor ran the checks and "${step}" failed. Fix the cause (do not weaken or delete checks or tests), then
 give the owner the same short summary as before. The end of the output:\n\n${output.slice(-6000)}`;
+}
+
+/** The editing AI ended without seeing its change at every screen size: one more turn to look (and fix). */
+export function lookPrompt(missing) {
+  return `Before the owner sees it: you have not looked at your change on ${missing.join(' and ')} since your last edit.
+Take screenshots now on ${missing.join(' and ')} of every kind of page where the change shows (and the Arabic page when
+it moves or sizes things). Check that it shows what the owner asked for, that every text and icon there is easy to
+read and that nothing overlaps or is cut off. Fix anything wrong. Then write your final message for the owner again,
+saying only what you saw.`;
 }
 
 const DIAGNOSE_RULES = `You find out why something is broken on one shop's online storefront (the current directory is its Next.js
