@@ -43,25 +43,28 @@ function shortPath(url, origin) {
  * Waits until the page has loaded and gone quiet (a dev preview compiles a page on its first visit and only then
  * hydrates it: a click before that does nothing), then a moment for it to react.
  */
-async function settle(page, networkMs, activity) {
+async function settle(page, networkMs, activity, minMs = 0) {
+  const start = Date.now();
   await page.waitForLoadState('load', { timeout: 20_000 }).catch(() => {});
   // quiet = no request in flight for 700 ms (Playwright's "network idle" gives up too early on a slow server action)
-  const until = Date.now() + networkMs;
-  while (Date.now() < until && (activity.inflight > 0 || Date.now() - activity.last < 700)) await page.waitForTimeout(100);
+  const until = start + networkMs;
+  while (Date.now() < until && (activity.inflight > 0 || Date.now() - activity.last < 700 || Date.now() - start < minMs)) await page.waitForTimeout(100);
 }
 
-function locate(page, step, { forFill = false } = {}) {
+function locate(page, step, { forFill = false, visibleOnly = false } = {}) {
+  // visibleOnly: a hidden copy (e.g. in a closed mini-cart) must not hide the one on the page
+  const pick = (locator) => (visibleOnly ? locator.filter({ visible: true }) : locator).first();
   // a link and a button are the same thing to a customer (the store shows one or the other by state): either matches
   const alike = { button: 'link', link: 'button' };
   if (step.role && step.name && alike[step.role]) {
-    return page.getByRole(step.role, { name: looseName(step.name) }).or(page.getByRole(alike[step.role], { name: looseName(step.name) })).first();
+    return pick(page.getByRole(step.role, { name: looseName(step.name) }).or(page.getByRole(alike[step.role], { name: looseName(step.name) })));
   }
-  if (step.role && step.name) return page.getByRole(step.role, { name: looseName(step.name) }).first();
-  if (step.role) return page.getByRole(step.role).first();
+  if (step.role && step.name) return pick(page.getByRole(step.role, { name: looseName(step.name) }));
+  if (step.role) return pick(page.getByRole(step.role));
   const label = step.name ?? step.text;
   if (!label) return null;
-  if (forFill) return page.getByLabel(looseName(label)).or(page.getByPlaceholder(looseName(label))).first();
-  return page.getByText(looseName(label)).first();
+  if (forFill) return pick(page.getByLabel(looseName(label)).or(page.getByPlaceholder(looseName(label))));
+  return pick(page.getByText(looseName(label)));
 }
 
 /** Signs in with the test customer at the store's own sign-in page. Never returns or logs the values. */
@@ -171,7 +174,9 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
             }
           } else await target.fill(String(step.value ?? ''), { timeout: 8000 });
         } else throw new Error(`Unknown step "${step.do}".`);
-        if (result.ok) await settle(page, 8000, activity);
+        // a tap often saves its result a moment later with no request at first (e.g. a cart kept in the browser):
+        // leaving the page at once would lose it
+        if (result.ok) await settle(page, 8000, activity, step.do === 'click' ? 1500 : 0);
         if (result.ok && leftTheStore) {
           result.ok = false;
           result.reason = 'That leaves the store preview, so it was not opened.';
@@ -187,8 +192,9 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
     // the re-check of a fixed bug: is the thing that was missing there now?
     let visible = null;
     if (expectVisible && results.every((r) => r.ok)) {
-      const target = locate(page, expectVisible);
-      visible = target ? await target.isVisible({ timeout: 4000 }).catch(() => false) : null;
+      // a page often fills in after it loads (a cart is fetched by the browser): give it a moment to appear
+      const target = locate(page, expectVisible, { visibleOnly: true });
+      visible = target ? await target.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false) : null;
     }
     const image = await page.screenshot({ type: 'jpeg', quality: 70 });
     return { visible, title: (await page.title().catch(() => '')).slice(0, 120), atPath: new URL(page.url()).pathname, steps: results, stoppedBeforePaying, consoleErrors, failedRequests, image };
