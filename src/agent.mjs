@@ -482,7 +482,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           outcome = 'bug';
           return;
         }
-        chats.say(storeId, chatId, 'assistant', decision.reply, { runId });
+        // our own words: looking into a problem never promises a fix
+        chats.say(storeId, chatId, 'assistant', said(text, 'I will look into it.', 'سأبحث في الأمر.'), { runId });
         const step = (line) => (light ? addLightStep(storeId, chatId, line) : addStep(storeId, line));
         step('Reading your report');
         const found = await diagnoser.diagnose({

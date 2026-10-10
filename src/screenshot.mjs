@@ -69,6 +69,11 @@ export async function acceptCookies(page) {
   if (await button.isVisible({ timeout: 1000 }).catch(() => false)) await button.click({ timeout: 2000 }).catch(() => {});
 }
 
+/** Waits (up to 20 s) until the page shows real content, not a blank page that is still being built. */
+export async function waitForContent(page, ms = 20_000) {
+  await page.waitForFunction(() => (document.body?.innerText ?? '').trim().length > 0, null, { timeout: ms }).catch(() => {});
+}
+
 export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport = 'desktop', fullPage = false, scrollTo = null, saveDir, index }) {
   const browser = await pool.get();
   try {
@@ -79,7 +84,9 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
         // the content is what counts; images and late scripts get a little longer but never block the shot
         await page.goto(new URL(pagePath, baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 120_000 });
         await page.waitForLoadState('load', { timeout: 20_000 }).catch(() => {});
-        await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+        // a dev preview compiles a page on its first visit: wait until it shows something
+        await waitForContent(page);
         await acceptCookies(page);
         if (scrollTo) {
           // the screen around the first element showing this text (e.g. "Add to cart")

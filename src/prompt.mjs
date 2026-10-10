@@ -117,6 +117,8 @@ Causes:
 
 Rules for the JSON:
 - "reproduced": true only when you saw the problem yourself.
+- When the owner only asks WHY something looks the way it does, the summary explains why in plain words; it never
+  promises to change anything.
 - "summary": plain words for the owner, at most 300 characters, in the language of the owner's latest message. Say what
   is wrong and why. Never name files, paths or code.
 - "steps": what you did to see the problem, as short plain sentences ("Open /en/cart on phone", "Tap Checkout").
