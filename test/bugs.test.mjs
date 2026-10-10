@@ -249,6 +249,17 @@ test('a re-check that still sees the problem says so', async () => {
   await git(['reset', '-q', '--hard', 'HEAD~1'], workspace);
 });
 
+test('a re-check that cannot open the page tells the owner instead of staying silent', async () => {
+  const chat = await newChat();
+  const hide = await commitOnStore('src/shop.css', 'h1 { color: black; }\n@media (max-width: 500px) { a { display: none; } }\n', 'AI Designer: Hide the checkout button on phone');
+  diagnosisAnswer = diagnosis({ suspectCommit: hide, fixPlan: 'Remove the rule.', recheck: { ...recheckFor('phone'), path: 'nope' } });
+  await sendAndWait(chat, 'the checkout button is missing on my phone');
+  const v = await sendAndWait(chat, 'Undo the change', { command: 'bug_undo', cardId: rawCard(chat).id });
+  assert.ok(v.messages.map((m) => m.text).includes('I could not check it again myself. Please look at the preview.'));
+  await call('POST', '/stores/acme/draft/discard', {});
+  await git(['reset', '-q', '--hard', 'HEAD~1'], workspace);
+});
+
 test('platform bug: a report for our team is made at once and the card says it was sent', async () => {
   const chat = await newChat();
   await commitOnStore('src/cart.css', 'h2 {}\n', 'Starter: heading shows a raw key', STARTER_AUTHOR);

@@ -206,14 +206,19 @@ export function createDiagnoser({ config, stores, previews, chats, reports, brow
     },
 
     /**
-     * Repeats a bug's steps in a fresh browser and says whether the problem is gone: "fixed", "still", or null when
-     * there is no way to tell. Never throws.
+     * Repeats a bug's steps in a fresh browser and says whether the problem is gone: "fixed", "still", "unchecked"
+     * when the page could not be checked, or null when there is nothing to check. Never throws.
      */
     async recheck(storeId, recheck) {
       if (!recheck || !browsers || !(recheck.expectVisible || recheck.expectNoError)) return null;
       try {
         const port = await previews.ensure(storeId);
-        const seen = await browse(browsers, { baseUrl: `http://127.0.0.1:${port}`, path: recheck.path, viewport: recheck.viewport, steps: recheck.steps, login: () => config.testLogin, expectVisible: recheck.expectVisible ?? null });
+        const visit = () => browse(browsers, { baseUrl: `http://127.0.0.1:${port}`, path: recheck.path, viewport: recheck.viewport, steps: recheck.steps, login: () => config.testLogin, expectVisible: recheck.expectVisible ?? null });
+        // right after a change the preview may still be rebuilding the page: the first visit can time out
+        const seen = await visit().catch((error) => {
+          log('recheck retry', storeId, error.message);
+          return visit();
+        });
         if (seen.steps.some((s) => !s.ok)) return 'still';
         if (recheck.expectVisible && seen.visible !== true) return 'still';
         if (recheck.expectNoError) {
@@ -223,7 +228,7 @@ export function createDiagnoser({ config, stores, previews, chats, reports, brow
         return 'fixed';
       } catch (error) {
         log('recheck failed', storeId, error.message);
-        return null;
+        return 'unchecked';
       }
     },
   };

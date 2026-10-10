@@ -390,6 +390,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     const lines = {
       fixed: ['Checked again: fixed.', 'تمت إعادة الفحص: تم الإصلاح.'],
       still: ['Checked again: it still happens.', 'تمت إعادة الفحص: المشكلة ما زالت موجودة.'],
+      unchecked: ['I could not check it again myself. Please look at the preview.', 'لم أتمكن من إعادة الفحص بنفسي. يرجى إلقاء نظرة على المعاينة.'],
     }[verdict];
     chats.say(storeId, chatId, 'assistant', said(text, ...lines), { runId, recheck: verdict });
   }
