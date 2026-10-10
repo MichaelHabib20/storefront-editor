@@ -196,6 +196,8 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
       const target = locate(page, expectVisible, { visibleOnly: true });
       visible = target ? await target.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false) : null;
     }
+    // a phone view shifted sideways (the store's rails spill) shows nearly nothing: back to where a shopper starts
+    await page.evaluate(() => window.scrollTo(0, window.scrollY)).catch(() => {});
     const image = await page.screenshot({ type: 'jpeg', quality: 70 });
     return { visible, title: (await page.title().catch(() => '')).slice(0, 120), atPath: new URL(page.url()).pathname, steps: results, stoppedBeforePaying, consoleErrors, failedRequests, image };
   } finally {

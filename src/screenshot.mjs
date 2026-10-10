@@ -120,6 +120,9 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
           await page.evaluate(() => window.scrollBy(0, -120)).catch(() => {});
           await page.waitForTimeout(500);
         }
+        // the store's rails spill sideways: a tap (the cookie button) or a scroll can leave a phone view shifted to the
+        // side, showing nearly nothing; back to where a shopper starts (also right for right-to-left pages)
+        await page.evaluate(() => window.scrollTo(0, window.scrollY)).catch(() => {});
         if (!whole) return await page.screenshot({ type: 'jpeg', quality: 70 });
         // only what the shopper sees across: content spilling sideways (a rail) must not widen or shift the shot; a
         // right-to-left page starts at its right edge
