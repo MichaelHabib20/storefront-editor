@@ -26,6 +26,8 @@ export function loadConfig(env = process.env) {
       ['npm', ['run', 'check:rules']],
       ['npx', ['eslint', '--max-warnings=0', '{codeFiles}']],
       ['npx', ['vitest', 'related', '--run', '--passWithNoTests', '{codeFiles}']],
+      // slips the store's linter lets through (e.g. two JSX attributes with no space between them)
+      ['node', [path.join(root, 'scripts', 'tidy-check.mjs'), '{codeFiles}']],
     ],
     /** The full checks: starter updates now, and before a publish (step 5, with the production build). */
     fullChecks: JSON.parse(env.EDITOR_FULL_CHECKS ?? 'null') ?? [

@@ -120,7 +120,14 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
           await page.evaluate(() => window.scrollBy(0, -120)).catch(() => {});
           await page.waitForTimeout(500);
         }
-        return await page.screenshot({ type: 'jpeg', quality: 70, fullPage: whole });
+        if (!whole) return await page.screenshot({ type: 'jpeg', quality: 70 });
+        // only what the shopper sees across: content spilling sideways (a rail) must not widen or shift the shot; a
+        // right-to-left page starts at its right edge
+        const box = await page.evaluate(() => {
+          const rtl = getComputedStyle(document.documentElement).direction === 'rtl';
+          return { x: rtl ? document.documentElement.scrollWidth - innerWidth : 0, width: innerWidth, height: Math.min(document.documentElement.scrollHeight, 12_000) };
+        });
+        return await page.screenshot({ type: 'jpeg', quality: 70, fullPage: true, clip: { x: box.x, y: 0, width: box.width, height: box.height } });
       } finally {
         await context.close().catch(() => {});
       }
