@@ -376,6 +376,18 @@ test('a bug asked while another chat builds is still looked at (a diagnosis only
   assert.ok(first.status === 202);
 });
 
+test('a first request only our team can build sends nothing yet and offers "Send it to our team"', async () => {
+  const chat = await newChat();
+  const before = (await team('GET', '/team/reports')).body.reports.length;
+  triageAnswer = { decision: 'needs_backend', reply: 'This needs a change on our side. I can send it to our team.' };
+  let v = await sendAndWait(chat, 'add a tax number box to checkout');
+  assert.deepEqual(v.messages.at(-1).options, ['Send it to our team']);
+  assert.equal((await team('GET', '/team/reports')).body.reports.length, before);
+  triageAnswer = { decision: 'needs_backend', reply: 'هذا يحتاج إلى تغيير من جهتنا.' };
+  v = await sendAndWait(chat, 'أضف خانة الرقم الضريبي');
+  assert.deepEqual(v.messages.at(-1).options, ['أرسله إلى فريقكم']);
+});
+
 test('something the store needs from us: the refusal makes a team report and says so on the card', async () => {
   const chat = await newChat();
   triageAnswer = { decision: 'refuse', refuseKind: 'needs_backend', reply: 'This needs a change on our side. I sent it to our team.', task: 'Show loyalty points in the header' };

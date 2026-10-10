@@ -582,7 +582,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         // a question about the AI Designer gets the store's preview link when one is running
         const preview = decision.decision === 'help' ? previews.list().find((p) => p.id === storeId) : null;
         const reply = decision.decision === 'go_ahead' ? 'There is no change waiting to be made. What would you like to change?' : decision.reply;
-        const options = decision.decision === 'unclear' ? cleanOptions(decision.options) : [];
+        // a request only our team can build is sent when the owner asks for it (then it is a "refuse" that makes a report)
+        const options =
+          decision.decision === 'unclear' ? cleanOptions(decision.options) : decision.decision === 'needs_backend' && reports ? [said(text, 'Send it to our team', 'أرسله إلى فريقكم')] : [];
         chats.say(storeId, chatId, 'assistant', reply, { runId, ...(preview ? { preview: preview.url } : {}), ...(options.length ? { options } : {}) });
         outcome = decision.decision === 'go_ahead' ? 'unclear' : decision.decision;
         return;

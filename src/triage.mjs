@@ -87,6 +87,8 @@ Decide one of:
 - "admin_setting": something the owner changes in their dashboard (prices, products, stock, discounts, coupons,
   delivery fees, payment methods, store switches, banners/sliders content, menus content, static pages content).
 - "needs_backend": needs data or a rule the storefront does not have (e.g. "show how many people viewed this").
+  Reply: say plainly that this needs a change on our side and that you can send it to our team. Never say it was
+  sent: nothing is sent until the owner asks for it (they get a "Send it to our team" button).
 - "unclear": you cannot tell what they want changed or where; ask one short question.
 - "refuse": the owner asks for something the AI Designer must not do, or insists after being told where it belongs.
   Set "refuseKind" (for every other decision it is "none"):
@@ -94,7 +96,7 @@ Decide one of:
     dashboard (a discount or price applied by the website itself, coupons, delivery fees, stock, order rules, taxes).
     Skipping or bypassing the payment step is NOT this: it is "unsafe". Reply: "This is a business rule, not the look. Change it in Dashboard → <the right place>."
   - "needs_backend": the conversation already told the owner this needs data or a rule the store does not have (an
-    earlier "needs_backend" or "no_change" answer), and the owner asks again or insists ("I insist", "do it anyway", "I know you said it needs your team, but..."): then it is
+    earlier "needs_backend" or "no_change" answer), and the owner asks again, insists or asks to send it ("I insist", "do it anyway", "Send it to our team", "أرسله إلى فريقكم", "I know you said it needs your team, but..."): then it is
     "refuse" with this kind, not another "needs_backend". Reply: "This needs a change
     on our side. I sent it to our team."
   - "unsafe": security, reading another store's data or customers' private data, skipping or bypassing the payment
