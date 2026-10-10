@@ -74,11 +74,29 @@ export async function waitForContent(page, ms = 20_000) {
   await page.waitForFunction(() => (document.body?.innerText ?? '').trim().length > 0, null, { timeout: ms }).catch(() => {});
 }
 
+/** Scrolls down the page and back so parts that load when seen (product rails, pictures) are there. */
+async function loadLazyParts(page) {
+  await page
+    .evaluate(async () => {
+      const end = Math.min(document.documentElement.scrollHeight, 20_000);
+      for (let y = 0; y < end; y += 600) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      window.scrollTo(0, 0);
+    })
+    .catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+}
+
 export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport = 'desktop', fullPage = false, scrollTo = null, saveDir, index }) {
   const browser = await pool.get();
   try {
     const shoot = async () => {
-      const context = await browser.newContext({ viewport: { width: VIEWPORTS[viewport].width, height: VIEWPORTS[viewport].height }, isMobile: VIEWPORTS[viewport].isMobile, deviceScaleFactor: VIEWPORTS[viewport].deviceScaleFactor });
+      const whole = fullPage && !scrollTo;
+      // a phone-emulated page shot whole is laid out again at the full size (rails spill, fixed bars move): the whole
+      // page is shot at the phone's width without the emulation instead
+      const context = await browser.newContext({ viewport: { width: VIEWPORTS[viewport].width, height: VIEWPORTS[viewport].height }, isMobile: whole ? false : VIEWPORTS[viewport].isMobile, deviceScaleFactor: whole ? 1 : VIEWPORTS[viewport].deviceScaleFactor });
       try {
         const page = await context.newPage();
         // the content is what counts; images and late scripts get a little longer but never block the shot
@@ -88,14 +106,21 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
         // a dev preview compiles a page on its first visit: wait until it shows something
         await waitForContent(page);
         await acceptCookies(page);
+        if (whole || scrollTo) await loadLazyParts(page);
         if (scrollTo) {
-          // the screen around the first element showing this text (e.g. "Add to cart")
-          const target = page.getByText(scrollTo, { exact: false }).first();
+          // the screen around the first shown element with this text, or this name (an icon button has only a name,
+          // e.g. the cards' "Add to cart")
+          const target = page
+            .getByText(scrollTo, { exact: false })
+            .or(page.getByRole('button', { name: scrollTo }))
+            .or(page.getByRole('link', { name: scrollTo }))
+            .filter({ visible: true })
+            .first();
           await target.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
           await page.evaluate(() => window.scrollBy(0, -120)).catch(() => {});
           await page.waitForTimeout(500);
         }
-        return await page.screenshot({ type: 'jpeg', quality: 70, fullPage: fullPage && !scrollTo });
+        return await page.screenshot({ type: 'jpeg', quality: 70, fullPage: whole });
       } finally {
         await context.close().catch(() => {});
       }
