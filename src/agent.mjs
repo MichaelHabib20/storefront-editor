@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
-import { fixPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
+import { explainPrompt, fixPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
 import { cleanOptions } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
@@ -172,24 +172,28 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
    * The screenshot tool for one run: only with a dev preview, which shows the copy as the agent edits it. The
    * preview is started (or reused) first, so the agent can look before it changes anything.
    */
-  async function eyesFor(storeId, runId) {
+  async function eyesFor(storeId, runId, { light = false, chatId = null } = {}) {
     if (!browsers || config.previewMode !== 'dev') return null;
     try {
-      setRun(storeId, { state: 'building_preview' });
+      // a run that only talks (another chat may hold the build) keeps its steps on its own chat
+      if (!light) setRun(storeId, { state: 'building_preview' });
       await previews.start(storeId);
       return screenshotServer({
         pool: browsers,
         // checked before every shot: a hung dev server is restarted instead of blinding the agent
         baseUrl: async () => `http://127.0.0.1:${await previews.ensure(storeId)}`,
         saveDir: path.join(config.dataDir, 'runs', runId),
-        onShot: (file) => setRun(storeId, { screenshots: [...(chats.state.get(storeId).run?.screenshots ?? []), file] }),
-        onStep: (text) => addStep(storeId, text, 'look'),
+        onShot: (file) => {
+          if (!light) setRun(storeId, { screenshots: [...(chats.state.get(storeId).run?.screenshots ?? []), file] });
+        },
+        onStep: (text) => (light ? addLightStep(storeId, chatId, text) : addStep(storeId, text, 'look')),
       });
     } catch (error) {
       log('no screenshots for this run', storeId, runId, error.message);
       return null;
     }
   }
+
 
   /** The plan waiting for the owner's OK (or null). */
   function setPending(storeId, chatId, plan) {
@@ -331,6 +335,45 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     return 'plan';
   }
 
+  /** A read-only look at the store that answers "why…?" in plain words (screenshots + reading code, no edits). */
+  async function explainTurn({ storeId, chatId, runId, text, light, settings, maxBudgetUsd, cwd }) {
+    const model = aiConfig.editModel(storeId, { large: false });
+    const eyes = browsers && config.previewMode === 'dev' ? await eyesFor(storeId, runId, { light, chatId }) : null;
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), config.turnTimeoutMs ?? 10 * 60_000);
+    let result = null;
+    try {
+      for await (const message of query({
+        prompt: `The owner asks:\n${text}\n\nThe conversation so far:\n${chats.recent(storeId, chatId, 8).map((m) => `${m.role}: ${m.text}`).join('\n')}`,
+        options: {
+          abortController: abort,
+          cwd,
+          model,
+          effort: settings.effort,
+          maxTurns: Math.min(settings.maxTurns, 20),
+          maxBudgetUsd: Math.max(0.01, maxBudgetUsd),
+          tools: ['Read', 'Glob', 'Grep'],
+          allowedTools: eyes ? ['Read', 'Glob', 'Grep', SCREENSHOT_TOOL] : ['Read', 'Glob', 'Grep'],
+          ...(eyes ? { mcpServers: { editor: eyes } } : {}),
+          permissionMode: 'dontAsk',
+          permissionPrompts: 'none',
+          settingSources: [],
+          strictMcpConfig: true,
+          persistSession: false,
+          systemPrompt: explainPrompt(),
+          env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
+          hooks: { PreToolUse: [{ hooks: [fileGuard(cwd, policy)] }] },
+        },
+      })) {
+        if (message.type === 'result') result = message;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    const costUsd = Number.isFinite(result?.total_cost_usd) ? result.total_cost_usd : 0;
+    return { text: result?.subtype === 'success' ? String(result.result ?? '').trim() : '', charge: { kind: 'explain', model, costUsd, usage: result?.modelUsage ?? null } };
+  }
+
   /** The bug card a button was pressed on (null when it is not there, used already, or has nothing to act on). */
   function cardOf(storeId, chatId, cardId) {
     const message = chats.get(storeId, chatId).messages.find((m) => m.id === cardId && m.kind === 'bug_report');
@@ -414,6 +457,10 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
 
     try {
       if (command?.name === 'read_website') {
+        if (chats.get(storeId, chatId).title === NEW_CHAT_TITLE) {
+          const host = /^https?:\/\/(?:www\.)?([^/:?#]+)/i.exec(command.url ?? '')?.[1];
+          if (host) chats.rename(storeId, chatId, said(text, `Look of ${host}`, `شكل ${host}`));
+        }
         outcome = await readWebsite({ storeId, chatId, runId, text, command, cwd });
         return;
       }
@@ -476,6 +523,13 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       } else if (decision.decision === 'edit') {
         job = { task: decision.task, large: decision.large, shared: !!decision.shared, images };
         ack = decision.reply;
+      } else if (decision.decision === 'explain') {
+        chats.say(storeId, chatId, 'assistant', said(text, 'I will have a look and explain.', 'سألقي نظرة وأشرح لك.'), { runId });
+        const answer = await explainTurn({ storeId, chatId, runId, text, light, settings, maxBudgetUsd: (reservation?.amountUsd ?? settings.perRequestMaxUsd) - spent, cwd });
+        charge(answer.charge);
+        chats.say(storeId, chatId, 'assistant', answer.text || said(text, 'I could not look at it right now.', 'لم أتمكن من الاطلاع عليه الآن.'), { runId });
+        outcome = 'explained';
+        return;
       } else if (decision.decision === 'bug') {
         if (!diagnoser || !browsers) {
           chats.say(storeId, chatId, 'assistant', said(text, 'I cannot look at your store right now. Please describe what you see, or try again in a few minutes.', 'لا أستطيع فحص متجرك الآن. صف لي ما تراه، أو حاول مرة أخرى بعد قليل.'), { runId });

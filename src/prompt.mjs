@@ -132,12 +132,23 @@ Rules for the JSON:
   console errors or failed requests). Null when there is no way to check.
 - Only state what you saw or read. Never invent a cause.`;
 
+const EXPLAIN_RULES = `You explain to a shop owner why something on their online storefront looks or behaves the way it does.
+You do NOT change anything: you have no editing tools. Look at the page with the screenshot tool (phone and desktop
+when it matters) and read the code of that part. Then answer in plain, short words (at most 5 sentences) in the
+language of the owner's message: what they see and why. Never name files, paths or code. Do not offer a fix unless
+they asked; you may end with one short line saying you can change it if they want.`;
+
+export function explainPrompt() {
+  return EXPLAIN_RULES;
+}
+
 export function diagnosePrompt() {
   return DIAGNOSE_RULES;
 }
 
 /** What the diagnosing AI is asked: the owner's report and the conversation. */
 export function diagnoseTask({ text, recent = [], pictures = 0 }) {
+  const language = /[؀-ۿ]/.test(text) ? 'Arabic' : 'English';
   const who = { merchant: 'Owner', assistant: 'AI Designer', system: 'Page' };
   const conversation = recent.length ? recent.map((m) => `${who[m.role] ?? 'AI Designer'}: ${m.text}`).join('\n') : '(none)';
   return `The owner reports a problem:
@@ -146,5 +157,5 @@ ${pictures ? `\nThe owner attached ${pictures} picture${pictures > 1 ? 's' : ''}
 The conversation so far (most recent last):
 ${conversation}
 
-Reproduce it, find the cause, and answer with the JSON.`;
+Reproduce it, find the cause, and answer with the JSON. Write "summary", "steps" and "adminPlace" in ${language} (the language of the owner's message).`;
 }

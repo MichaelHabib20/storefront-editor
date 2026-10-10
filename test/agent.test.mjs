@@ -399,3 +399,16 @@ test('after the editor throws the AI\'s edits away, the next edit is told so (on
   assert.doesNotMatch(agentCalls[2].prompt, /thrown away by the editor/, 'said once');
   await call('POST', '/stores/acme/draft/discard');
 });
+
+test('"why does it look like this?" is explained by a read-only look: no edit tools, no draft', async () => {
+  triageAnswer = { decision: 'explain', reply: 'x' };
+  agentScript = [async () => ({ text: 'The X drops to the next line because the banner row may wrap on narrow screens.' })];
+  const chat = await runToEnd('why is the X on the next line?');
+  assert.equal(chat.run.outcome, 'explained');
+  assert.equal(chat.messages.at(-1).text, 'The X drops to the next line because the banner row may wrap on narrow screens.');
+  assert.equal(chat.messages.at(-2).text, 'I will have a look and explain.');
+  const call = agentCalls.at(-1);
+  assert.deepEqual(call.options.tools, ['Read', 'Glob', 'Grep']);
+  assert.match(call.options.systemPrompt, /You do NOT change anything/);
+  assert.equal(chat.draft, null);
+});

@@ -48,6 +48,9 @@ before(async () => {
       return send(page('<form method="post"><input name="identifier"><input name="password" type="password"><button type="submit">Sign in</button></form>'));
     }
     if (url.pathname === '/en/account') return send(page('<h1>My account</h1>'));
+    if (url.pathname === '/en/covered') {
+      return send(page(`<button onclick="document.title='tapped'" style="margin-top:300px">Add to cart</button><div style="position:fixed;inset:0;background:rgba(0,0,0,0.01)">cookie banner over everything</div>`));
+    }
     if (url.pathname === '/en/cart') {
       return send(
         page(`<style>@media (max-width: 500px) { #checkout { display: none } }</style>
@@ -98,6 +101,12 @@ test('a link and a button count as the same control (the store shows one or the 
   assert.equal(asLink.visible, true, 'asked for a link, the page has a button');
   const hidden = await browse(pool, { baseUrl: base, path: '/en/cart', viewport: 'phone', steps: [], expectVisible: { role: 'button', name: 'Checkout' } });
   assert.equal(hidden.visible, false, 'hidden on the phone either way');
+});
+
+test('a button under a fixed banner or bar is still tapped', async () => {
+  const seen = await browse(pool, { baseUrl: base, path: '/en/covered', viewport: 'phone', steps: [{ do: 'click', role: 'button', name: 'Add to cart' }] });
+  assert.equal(seen.steps[0].ok, true, JSON.stringify(seen.steps));
+  assert.equal(seen.title, 'tapped');
 });
 
 test('act: each step answers ok or failed with the reason, and stops at the first failure', async () => {

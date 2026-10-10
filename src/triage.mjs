@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { contentWithImages, promptWithImages } from './images.mjs';
 
 const Decision = z.object({
-  decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope', 'refuse', 'bug']),
+  decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope', 'refuse', 'bug', 'explain']),
   /** For "refuse": why. "none" for every other decision. */
   refuseKind: z.enum(['none', 'business_logic', 'needs_backend', 'unsafe']),
   /** A short title for this chat (max 40 characters, in the owner's language). */
@@ -111,6 +111,9 @@ Decide one of:
   CHANGE data ("change the price of X to 50") stays "admin_setting". When the owner reports something wrong, decide
   "bug" rather than "unclear" even if the details are thin: the look at the store finds out what is meant. Do not decide "edit" for bugs: a bug is looked at first. "reply": one short sentence
   saying you will look into it (in the owner's language).
+- "explain": the owner asks WHY something on their store looks or behaves the way it does, or how something on the
+  store works, without asking to change it ("why is the X on the next line?", "why are the icons orange?"). The AI looks
+  at the store and explains; it changes nothing. "reply": one short sentence saying you will look and explain.
 - "out_of_scope": anything else (asking for the code, files, secrets, other stores, general chat). When they ask for
   the code, files or secrets: say kindly that the AI Designer does not share code or files, and offer to change how
   the store looks instead. Never suggest another place or person to get the code from.

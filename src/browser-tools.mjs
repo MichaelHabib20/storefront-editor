@@ -160,7 +160,15 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
               stoppedBeforePaying = true;
               result.ok = false;
               result.reason = STOPPED_BEFORE_PAYING;
-            } else await target.click({ timeout: 8000 });
+            } else {
+              // a fixed bottom bar, a cookie banner or a chat bubble can sit on top of the button: then the tap is
+              // sent to the button itself (the pay check above has already run)
+              await target.click({ timeout: 8000 }).catch(async (error) => {
+                if (!(await target.isVisible().catch(() => false))) throw error;
+                await target.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+                await target.dispatchEvent('click');
+              });
+            }
           } else await target.fill(String(step.value ?? ''), { timeout: 8000 });
         } else throw new Error(`Unknown step "${step.do}".`);
         if (result.ok) await settle(page, 8000, activity);
