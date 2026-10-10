@@ -99,8 +99,9 @@ question instead of changing anything.`;
 }
 
 export function fixPrompt(step, output) {
-  return `The editor ran the checks and "${step}" failed. Fix the cause (do not weaken or delete checks or tests), then
-give the owner the same short summary as before. The end of the output:\n\n${output.slice(-6000)}`;
+  return `The editor ran the checks and "${step}" failed. Fix the cause (do not weaken or delete checks or tests). The owner
+never sees the checks: your final message must not mention them, this fix, errors or code. Write it as if all went
+right the first time: what changed for the owner and where to look. The end of the output:\n\n${output.slice(-6000)}`;
 }
 
 /** The editing AI ended without seeing its change at every screen size: one more turn to look (and fix). */
