@@ -386,6 +386,12 @@ test('a first request only our team can build sends nothing yet and offers "Send
   triageAnswer = { decision: 'needs_backend', reply: 'هذا يحتاج إلى تغيير من جهتنا.' };
   v = await sendAndWait(chat, 'أضف خانة الرقم الضريبي');
   assert.deepEqual(v.messages.at(-1).options, ['أرسله إلى فريقكم']);
+  // tapping it: the report carries the request, not the button's words
+  triageAnswer = { decision: 'refuse', refuseKind: 'needs_backend', reply: 'تم الإرسال إلى فريقنا.', task: '' };
+  await sendAndWait(chat, 'أرسله إلى فريقكم');
+  const made = (await team('GET', '/team/reports?store=acme')).body.reports.find((r) => r.summary === 'أضف خانة الرقم الضريبي');
+  assert.ok(made, 'the report is named after the request');
+  assert.equal((await team('GET', `/team/reports/${made.id}`)).body.ownerText, 'أضف خانة الرقم الضريبي');
 });
 
 test('something the store needs from us: the refusal makes a team report and says so on the card', async () => {

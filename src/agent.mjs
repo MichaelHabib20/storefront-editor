@@ -564,14 +564,17 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         return;
       } else if (decision.decision === 'refuse') {
         const refuseKind = ['business_logic', 'needs_backend', 'unsafe'].includes(decision.refuseKind) ? decision.refuseKind : 'unsafe';
-        // something the store needs from us: our team gets the owner's words (and pictures)
+        // something the store needs from us: our team gets the owner's words (and pictures). "Send it to our team"
+        // says nothing by itself: the request is the owner's message before it
+        const tapped = /^(send it to our team|أرسله إلى فريقكم)$/i.test(text.trim());
+        const request = tapped ? (chats.get(storeId, chatId).messages.filter((m) => m.role === 'merchant' && m.text).at(-2)?.text ?? text) : text;
         const report =
           refuseKind === 'needs_backend' && reports
             ? reports.create({
                 storeId,
                 chatId,
-                summary: (decision.task || text).slice(0, 300),
-                ownerText: text,
+                summary: (decision.task || request).slice(0, 300),
+                ownerText: request,
                 files: { images: savedRefs.map((r) => ({ path: path.join(config.dataDir, 'uploads', storeId, chatId, r.file), name: r.file })) },
               })
             : null;

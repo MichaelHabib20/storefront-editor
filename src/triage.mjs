@@ -126,7 +126,9 @@ open (e.g. "make the header green", "make the add to cart buttons on the product
 else: vague wording ("a new design", "make it nicer"), more than one element or page, anything site-wide (colours,
 fonts, icons used in many places), or when you had to guess. When true, "reply" is the plan: what you will change and
 where, what stays as it is, ending with a short "Shall I go ahead?" (in the owner's language).
-"task": for "edit" only (empty otherwise): the job for the AI that edits the code, in English, 1-3 sentences, resolved
+"task": for "refuse" with "needs_backend": what the owner wants our team to build, in English, one sentence, taken from
+the WHOLE conversation (when they tap "Send it to our team", the request is in an earlier message).
+For "edit": the job for the AI that edits the code (empty for every other decision), in English, 1-3 sentences, resolved
 against the WHOLE conversation (the owner's latest message is often a short answer to an earlier question, e.g. "make it
 an icon" after asking about the Add to Cart button means the Add to Cart button). Say exactly what changes, where
 (which page, which element, e.g. "the Add to Cart buttons on the product cards in listings and rails") and what must
