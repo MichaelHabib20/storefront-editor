@@ -100,6 +100,8 @@ test('the stream sends the chat at once and every change after, in order, in the
   const listening = listen(`${base}/stores/acme/events?ticket=${encodeURIComponent(ticket)}`, { count: 3 });
   await new Promise((r) => setTimeout(r, 300));
   app.chats.say('acme', 'c_main', 'merchant', 'make the header green');
+  // (two changes at the same instant send only the newer view: see the burst test)
+  await new Promise((r) => setTimeout(r, 300));
   app.chats.state.update('acme', (state) => {
     state.run = { chatId: 'c_main', id: 'r1', state: 'editing', model: 'claude-sonnet-5-5', costUsd: 0.12, lastFailure: { output: 'src/x.tsx' } };
   });
@@ -133,4 +135,15 @@ test('the stream says "expired" and ends when its ticket runs out', async () => 
   const result = await listen(`${base}/stores/acme/events?ticket=${encodeURIComponent(ticket)}`, { timeoutMs: 5000 });
   assert.equal(result.timedOut, undefined, 'the server closed it');
   assert.deepEqual(result.events.map((e) => e.name), ['chat', 'expired']);
+});
+
+test('a burst of changes ends with the newest view (an older, slower one never arrives last)', async () => {
+  const ticket = signTicket(KEY, 'acme', Date.now() / 1000 + 60);
+  const listening = listen(`${base}/stores/acme/events?ticket=${encodeURIComponent(ticket)}`, { timeoutMs: 2500 });
+  await new Promise((r) => setTimeout(r, 300));
+  for (let i = 1; i <= 8; i++) app.chats.say('acme', 'c_main', 'merchant', `burst ${i}`);
+  const result = await listening;
+  result.close?.();
+  const last = result.events.filter((e) => e.name === 'chat').at(-1).data;
+  assert.equal(last.messages.at(-1).text, 'burst 8');
 });

@@ -319,9 +319,15 @@ export function createApp(config = loadConfig(), deps = {}) {
     // note: Cloudflare *quick* tunnels (trycloudflare.com) do not pass server-sent events on; the admin page then
     // keeps polling. Named tunnels and normal proxies stream them.
     res.write('retry: 3000\n\n');
+    // views take a moment to build (git is asked about the website): a slower, older one must never arrive after a
+    // newer one, or the page shows the past (e.g. Approve still there after Approve)
+    let latest = 0;
     const push = async () => {
+      const mine = ++latest;
       try {
-        res.write(`event: chat\ndata: ${JSON.stringify(await view(id, chatId))}\n\n`);
+        const current = await view(id, chatId);
+        if (mine !== latest) return;
+        res.write(`event: chat\ndata: ${JSON.stringify(current)}\n\n`);
       } catch {
         // the chat was deleted while open: the page notices on its next list refresh
       }
