@@ -12,7 +12,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { explainPrompt, fixPrompt, lookPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
 import { missingLooks } from './looks.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
-import { cleanOptions } from './triage.mjs';
+import { cleanOptions, splitChoices } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
 import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
 import { must, run } from './run.mjs';
@@ -653,6 +653,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         if (eyes && !looked && changed.length) {
           looked = true;
           const missing = await missingLooks(cwd, changed, path.join(config.dataDir, 'runs', runId));
+          log('looked', storeId, runId, missing.length ? `missing ${missing.join(', ')}` : 'phone and desktop');
           if (missing.length) {
             phase('editing', 'Looking at the change on phone and desktop', { model });
             turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
@@ -666,7 +667,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         if (outside.length) throw new ChangeError('outside_allowed_files', `Changed files the editor does not allow: ${outside.join(', ')}`);
         if (changed.length === 0) {
           // the agent explained instead of editing (needs the backend, a question...)
-          chats.say(storeId, chatId, 'assistant', turn.text || 'I did not change anything.', { runId });
+          // a question ending with short choices: the choices become tap buttons
+          const asked = splitChoices(turn.text || 'I did not change anything.');
+          chats.say(storeId, chatId, 'assistant', asked.text, { runId, ...(asked.options.length ? { options: asked.options } : {}) });
           outcome = 'no_change';
           return;
         }

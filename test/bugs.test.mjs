@@ -415,3 +415,14 @@ test('never pays: the diagnosing prompt forbids it and the browser refuses (see 
   const { diagnosePrompt } = await import('../src/prompt.mjs');
   assert.match(diagnosePrompt(), /Never place an order and never pay/);
 });
+
+test('a question from the editing AI that ends with short numbered choices shows them as buttons', async () => {
+  const { splitChoices } = await import('../src/triage.mjs');
+  assert.deepEqual(splitChoices('Which part do you mean?\n1. The newsletter strip\n2. The bottom bar\n3. Both'), { text: 'Which part do you mean?', options: ['The newsletter strip', 'The bottom bar', 'Both'] });
+  assert.deepEqual(splitChoices('أي جزء تقصد؟\n- الشريط العلوي\n- الشريط السفلي'), { text: 'أي جزء تقصد؟', options: ['الشريط العلوي', 'الشريط السفلي'] });
+  // not a question, one item, or long items: left as it is
+  const done = 'I changed it.\n1. Header\n2. Footer';
+  assert.deepEqual(splitChoices(done), { text: done, options: [] });
+  const long = `Which?\n1. ${'x'.repeat(61)}\n2. b`;
+  assert.deepEqual(splitChoices(long), { text: long, options: [] });
+});

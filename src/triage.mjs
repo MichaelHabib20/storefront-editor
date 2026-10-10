@@ -2,6 +2,7 @@
  * Triage (agent design §2.2 step 1): a cheap model decides what a merchant message is before any code is touched.
  * Only `edit` goes on to the agent; everything else is answered here for the cost of one small call.
  */
+import { DASHBOARD_PLACES } from './dashboard-places.mjs';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
@@ -38,6 +39,19 @@ export function cleanOptions(options) {
     if (out.length === 4) break;
   }
   return out;
+}
+
+/**
+ * A question from the editing AI that ends with 2-4 numbered or bulleted choices: the choices become tap buttons and
+ * leave the text. Unchanged when the list is not short choices (each at most 60 characters).
+ */
+export function splitChoices(text) {
+  const lines = String(text ?? '').trim().split('\n');
+  const items = [];
+  while (lines.length && /^\s*(?:\d+[.)]|[-*•])\s+\S/.test(lines.at(-1))) items.unshift(lines.pop().replace(/^\s*(?:\d+[.)]|[-*•])\s+/, '').replace(/\*\*/g, '').trim());
+  const rest = lines.join('\n').trim();
+  if (items.length < 2 || items.length > 4 || items.some((item) => item.length > 60) || !/[?؟]\s*$/.test(rest)) return { text, options: [] };
+  return { text: rest, options: cleanOptions(items) };
 }
 
 // the engine rejects the draft 2020-12 `$schema` header zod adds
@@ -86,6 +100,10 @@ Decide one of:
   or undo, what it can do, the allowance). Answer it from the facts above, short.
 - "admin_setting": something the owner changes in their dashboard (prices, products, stock, discounts, coupons,
   delivery fees, payment methods, store switches, banners/sliders content, menus content, static pages content).
+  These storefront parts are switched on/off and worded in the dashboard (Dashboard → Settings → Configurations, then
+  the tab named here). Showing, hiding or rewording one of them is "admin_setting" (reply with that place); changing
+  how it LOOKS (colour, size, shape, position) is still "edit":
+${DASHBOARD_PLACES}
 - "needs_backend": needs data or a rule the storefront does not have (e.g. "show how many people viewed this").
   Reply: say plainly that this needs a change on our side and that you can send it to our team. Never say it was
   sent: nothing is sent until the owner asks for it (they get a "Send it to our team" button).
