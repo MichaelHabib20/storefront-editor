@@ -238,3 +238,15 @@ export function createTriage({ client = new Anthropic(), model }) {
     return { ...parsed, model, usage: response.usage, costUsd: costOf(model, response.usage) };
   };
 }
+
+/**
+ * Colour codes the owner never wrote are taken out of a message for them ("a darker blue, something like #1a2f7a"
+ * → "a darker blue"): the owner hears colours in words. Codes the owner gave stay.
+ */
+export function withoutNewColourCodes(text, ownerTexts = []) {
+  const given = new Set(ownerTexts.join(' ').toLowerCase().match(/#[0-9a-f]{3,8}\b/g) ?? []);
+  return String(text ?? '')
+    .replace(/(\s*[—–-]\s*|,\s*|\s+)?(?:to|something like|like|such as|e\.g\.|around|about)?\s*\(?(#[0-9a-fA-F]{3,8})\b\)?/g, (match, _lead, code) => (given.has(code.toLowerCase()) ? match : ''))
+    .replace(/\s+([.,!?])/g, '$1')
+    .replace(/[—–-]\s*([.!?])/g, '$1');
+}

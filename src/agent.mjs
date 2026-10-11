@@ -14,7 +14,7 @@ import { admitsUnchecked, missingLooks } from './looks.mjs';
 import { samplePages } from './sample-pages.mjs';
 import { onlyExtends } from './shared-diff.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
-import { cleanOptions, splitChoices } from './triage.mjs';
+import { cleanOptions, splitChoices, withoutNewColourCodes } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
 import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
 import { must, run } from './run.mjs';
@@ -535,6 +535,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const pendingRefs = decision.decision === 'go_ahead' ? [...(pending?.images ?? []), ...savedRefs].slice(0, 3) : savedRefs;
       let job = null;
       let ack = null;
+      // colour codes the owner never wrote are said in words only
+      const plain = (reply) => withoutNewColourCodes(reply, chats.get(storeId, chatId).messages.filter((m) => m.role === 'merchant').map((m) => m.text ?? ''));
       // said before the work starts: a reply that already claims the result is replaced by a plain promise
       const promise = (reply) => (!reply || /\b(done|is now|are now|i['’]ve (changed|made|updated)|i have (changed|made|updated))\b|^تم |أصبح|صار/i.test(reply) ? said(text, "I'll make this change now.", 'سأنفّذ هذا التغيير الآن.') : reply);
       if (decision.decision === 'go_ahead' && pending?.afterApprove && chats.state.get(storeId).draft) {
@@ -548,7 +550,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
         // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
         setPending(storeId, chatId, { task: decision.task, large: decision.large, shared: !!decision.shared, images: savedRefs });
-        chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'plan', options: cleanOptions(decision.options) });
+        chats.say(storeId, chatId, 'assistant', plain(decision.reply), { runId, kind: 'plan', options: cleanOptions(decision.options) });
         outcome = 'plan';
         return;
       } else if (command && card) {
@@ -661,7 +663,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           return;
         }
       }
-      chats.say(storeId, chatId, 'assistant', ack, { runId, kind: 'understood' });
+      chats.say(storeId, chatId, 'assistant', plain(ack), { runId, kind: 'understood' });
       setPending(storeId, chatId, null);
 
       if (job.undo) {
@@ -742,7 +744,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
               state.draft = { branch: draftOf(storeId), commit, updatedAt: new Date().toISOString(), chatId: state.draft?.chatId ?? chatId };
             });
             // a follow-up question ending with short choices: the choices become tap buttons
-            const done = splitChoices(turn.text || 'Done. Have a look at the preview.');
+            const done = splitChoices(plain(turn.text || 'Done. Have a look at the preview.'));
             chats.say(storeId, chatId, 'assistant', done.text, { runId, preview: preview.url, ...(done.options.length ? { options: done.options } : {}) });
             outcome = 'preview';
             if (job.recheck) await announceRecheck(storeId, chatId, runId, text, job.recheck);
