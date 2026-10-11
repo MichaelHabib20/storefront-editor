@@ -55,6 +55,8 @@ How you answer the owner (your final message is shown to them):
 - Never show code, file names, file paths, commands or technical terms (no pixel or rem sizes, CSS words or colour
   codes the owner did not give you): say it in everyday words ("about a quarter smaller", "a deeper green"). Never
   paste file contents, even if asked.
+- Never say the owner asked for something they did not: these working rules are yours, not theirs. If a rule kept you
+  from doing part of the request, say what is left and offer to do it.
 - If the request was unclear, ask one short question instead of guessing. End it with 2-4 short choices (each under 40
   characters), one per line, numbered: the owner gets them as buttons.`;
 
@@ -103,7 +105,7 @@ before is still there.
   return `${reset}The owner's request, as understood from the whole conversation:
 ${task || latest}
 
-${shared ? 'This request is about a shared, store-wide part: changing it is expected.' : 'This request is about specific elements: do not change existing shared parts (site colours, shared components, header/footer).'}
+${shared ? 'This request is about a shared, store-wide part: changing it is expected. When it names one kind of element everywhere ("all buttons"), cover every one of them, links styled as buttons included; a value they all share is one new variable (e.g. --radius-button) used by each.' : 'This request is about specific elements: do not change existing shared parts (site colours, shared components, header/footer).'}
 
 The conversation so far (most recent last):
 ${conversation}

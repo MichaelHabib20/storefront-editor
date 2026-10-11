@@ -154,7 +154,8 @@ stay as it is. Never leave out the element the conversation is about.
 "shared": for "edit" only. true when the owner asks for something that is the same across the whole store: the main
 or brand colours, fonts, an icon everywhere it appears, and ANY element of the page frame that shows on every page — the
 header and anything in it (logo, search box, header icons), the announcement bar, the menus, the footer and anything in
-it. false when the request is about elements inside pages (e.g. "the add to cart buttons on the product cards", "the
+it. Also true when the owner asks for one kind of element EVERYWHERE ("all buttons", "every heading", "all prices
+across the store"): that includes the shared building blocks too. false when the request is about elements inside pages (e.g. "the add to cart buttons on the product cards", "the
 category tiles on the home page"), even if a site-wide change could also do it.
 Do not ask about a detail that has an obvious default: put the default in the plan instead (a shopping cart icon for an
 "Add to cart" button, the store's main colour for a new button) and ask "Shall I go ahead?". Ask at most one question at a
