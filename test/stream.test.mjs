@@ -100,8 +100,8 @@ test('the stream sends the chat at once and every change after, in order, in the
   const listening = listen(`${base}/stores/acme/events?ticket=${encodeURIComponent(ticket)}`, { count: 3 });
   await new Promise((r) => setTimeout(r, 300));
   app.chats.say('acme', 'c_main', 'merchant', 'make the header green');
-  // (two changes at the same instant send only the newer view: see the burst test)
-  await new Promise((r) => setTimeout(r, 300));
+  // (two changes at the same instant send only the newer view: see the burst test; a busy machine needs the gap)
+  await new Promise((r) => setTimeout(r, 1500));
   app.chats.state.update('acme', (state) => {
     state.run = { chatId: 'c_main', id: 'r1', state: 'editing', model: 'claude-sonnet-5-5', costUsd: 0.12, lastFailure: { output: 'src/x.tsx' } };
   });

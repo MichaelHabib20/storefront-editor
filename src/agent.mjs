@@ -643,10 +643,11 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
             'assistant',
             said(
               text,
-              `Another change is being made in "${otherTitle}". You can keep planning here; I will build this when it is finished.`,
-              `يجري الآن تنفيذ تغيير آخر في "${otherTitle}". يمكنك متابعة التخطيط هنا، وسأنفذ هذا الطلب عندما ينتهي.`,
+              `Another change is being made in "${otherTitle}". I kept your request: when that one is finished, tap "Yes, go ahead" here and I will build it.`,
+              `يجري الآن تنفيذ تغيير آخر في "${otherTitle}". احتفظت بطلبك: عندما ينتهي، اضغط "نعم، تابع" هنا وسأنفذه.`,
             ),
-            { runId, notice: 'busy_other_chat' },
+            // nothing builds by itself later: the owner says when (the plan waits in this chat)
+            { runId, notice: 'busy_other_chat', kind: 'plan', options: said(text, ['Yes, go ahead'], ['نعم، تابع']) },
           );
           outcome = 'busy_other_chat';
           return;

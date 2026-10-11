@@ -211,7 +211,8 @@ test('one build at a time: another chat gets busy_other_chat, keeps the plan, ca
 
   // a build request in B: answered as a message, not an error; the plan waits
   const asked = await sendAndWait(b, 'make the footer green');
-  assert.equal(asked.messages.at(-1).text, 'Another change is being made in "Header colour". You can keep planning here; I will build this when it is finished.');
+  assert.equal(asked.messages.at(-1).text, 'Another change is being made in "Header colour". I kept your request: when that one is finished, tap "Yes, go ahead" here and I will build it.');
+  assert.deepEqual(asked.messages.at(-1).options, ['Yes, go ahead']);
   assert.equal(app.chats.get('acme', b).pending.task, 'Make it v2.');
   assert.equal(app.chats.get('acme', b).lightRun.outcome, 'busy_other_chat');
   // a question in B: a normal answer
