@@ -12,7 +12,9 @@ export const DASHBOARD_PLACES = `  - products, their prices, pictures, stock and
   - text pages (About us, policies, FAQ, any new page of text): Dashboard → Store front → Static pages (add a page or
     edit one there; this store already has an About us page)
   - the menus and their links: Dashboard → Store front → Menus
-  - home page blocks, banners and sliders (which ones, their pictures and order): Dashboard → Store front → Sections
+  - the home page's product rows, banners and sliders (which ones show, their products, pictures and order):
+    Dashboard → Store front → Sections. A NEW kind of block (e.g. boxes with icons and short texts) is not made there:
+    building it is an "edit"
   - the "Download App Now" bar (and its title and text): Dashboard → Settings → Configurations, tab Setting →
     "Enable Download App"
   - compare buttons and the compare page: Configurations, tab Theme → "Disable Compare"
