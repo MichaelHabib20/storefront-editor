@@ -442,3 +442,13 @@ test('the AI service out of reach says so (in the owner\'s language) instead of 
   v = await sendAndWait(chat, 'اجعل الهيدر أزرق');
   assert.match(v.messages.at(-1).text, /تعذّر عليّ الوصول/);
 });
+
+test('the message before a change never claims it is done', async () => {
+  const chat = await newChat();
+  triageAnswer = { decision: 'edit', reply: 'Done! The header is now a deeper blue on all pages.', task: 'Make the header a deeper blue', confirm: false, large: false, shared: true, refuseKind: 'none', title: '', options: [] };
+  agentScript = [(cwd) => write(cwd, 'src/shop.css', 'h1 { color: navy; }\n')];
+  const v = await sendAndWait(chat, 'make the header darker');
+  assert.equal(v.messages[1].text, "I'll make this change now.");
+  assert.ok(!v.messages.some((m) => /Done!/.test(m.text)));
+  await call('POST', '/stores/acme/draft/discard', {});
+});

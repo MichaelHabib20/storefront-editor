@@ -527,6 +527,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const pendingRefs = decision.decision === 'go_ahead' ? [...(pending?.images ?? []), ...savedRefs].slice(0, 3) : savedRefs;
       let job = null;
       let ack = null;
+      // said before the work starts: a reply that already claims the result is replaced by a plain promise
+      const promise = (reply) => (!reply || /\b(done|is now|are now|i['’]ve (changed|made|updated)|i have (changed|made|updated))\b|^تم |أصبح|صار/i.test(reply) ? said(text, "I'll make this change now.", 'سأنفّذ هذا التغيير الآن.') : reply);
       if (decision.decision === 'go_ahead' && pending?.afterApprove && chats.state.get(storeId).draft) {
         // the step before must be approved first, so this change stands on its own
         chats.say(storeId, chatId, 'assistant', said(text, 'Please press Approve at the top first, then say "yes" and I will apply the look.', 'اضغط "موافقة" في الأعلى أولًا، ثم قل "نعم" وسأطبّق الشكل.'), { runId, kind: 'plan', options: said(text, ['Yes, go ahead'], ['نعم، تابع']) });
@@ -534,7 +536,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         return;
       } else if (decision.decision === 'go_ahead' && pending) {
         job = { task: pending.task, large: pending.large, shared: !!pending.shared, images: [...loadImages(config.dataDir, storeId, chatId, pending.images), ...images].slice(0, 3), then: pending.then ?? null };
-        ack = pending.ack || decision.reply || 'On it.';
+        ack = pending.ack || promise(decision.reply);
       } else if (decision.decision === 'edit' && (decision.confirm || decision.large)) {
         // unclear, large or site-wide: show the plan and wait for the owner's OK (a large request always asks)
         setPending(storeId, chatId, { task: decision.task, large: decision.large, shared: !!decision.shared, images: savedRefs });
@@ -549,10 +551,10 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           const message = chat.messages.find((m) => m.id === command.cardId);
           if (message?.card) message.card.used = used;
         });
-        ack = decision.reply;
+        ack = promise(decision.reply);
       } else if (decision.decision === 'edit') {
         job = { task: decision.task, large: decision.large, shared: !!decision.shared, images };
-        ack = decision.reply;
+        ack = promise(decision.reply);
       } else if (decision.decision === 'explain') {
         chats.say(storeId, chatId, 'assistant', said(text, 'I will have a look and explain.', 'سألقي نظرة وأشرح لك.'), { runId });
         const answer = await explainTurn({ storeId, chatId, runId, text, light, settings, maxBudgetUsd: (reservation?.amountUsd ?? settings.perRequestMaxUsd) - spent, cwd });

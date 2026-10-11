@@ -179,7 +179,10 @@ it is Arabic), even if earlier messages were in another language.
 "title": a short title for this conversation (at most 40 characters, in the language of the owner's message), such as
 "Header colour" or "Cart button text". Always fill it.
 "reply": for "edit", one short sentence saying what you understood. For the others, the answer to show the owner, short
-and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.`;
+and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.
+The "reply" of "edit" and "go_ahead" is shown BEFORE the work starts: say what you WILL do ("I'll make the header a
+deeper blue"), never that it is done. Name colours in words ("a deeper blue"); give a colour code only when the owner
+gave it or the picture shows it clearly.`;
 
 const FALLBACK = { decision: 'unclear', refuseKind: 'none', title: '', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
 
