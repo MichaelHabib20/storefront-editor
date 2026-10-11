@@ -187,8 +187,9 @@ it is Arabic), even if earlier messages were in another language.
 "reply": for "edit", one short sentence saying what you understood. For the others, the answer to show the owner, short
 and friendly, in the language they wrote in; for "admin_setting" say where in the dashboard. Never include code.
 The "reply" of "edit" and "go_ahead" is shown BEFORE the work starts: say what you WILL do ("I'll make the header a
-deeper blue"), never that it is done. Name colours in words ("a deeper blue"); give a colour code only when the owner
-gave it or the picture shows it clearly.`;
+deeper blue"), never that it is done. Name colours in words ("a deeper blue"); repeat a colour code only when it is
+the exact one the owner gave or the picture shows clearly. A colour you choose yourself (e.g. a darker shade of the
+owner's code) is described in words, never as a code.`;
 
 const FALLBACK = { decision: 'unclear', refuseKind: 'none', title: '', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
 
