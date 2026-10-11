@@ -100,9 +100,9 @@ Decide one of:
   or undo, what it can do, the allowance). Answer it from the facts above, short.
 - "admin_setting": something the owner changes in their dashboard (prices, products, stock, discounts, coupons,
   delivery fees, payment methods, store switches, banners/sliders content, menus content, static pages content).
-  These storefront parts are switched on/off and worded in the dashboard (Dashboard → Settings → Configurations, then
-  the tab named here). Showing, hiding or rewording one of them is "admin_setting" (reply with that place); changing
-  how it LOOKS (colour, size, shape, position) is still "edit":
+  These storefront parts are added, switched on/off and worded in the dashboard (the place is named for each).
+  Adding, showing, hiding or rewording one of them is "admin_setting" (reply with that place, never "our team");
+  changing how it LOOKS (colour, size, shape, position) is still "edit":
 ${DASHBOARD_PLACES}
 - "needs_backend": needs data or a rule the storefront does not have (e.g. "show how many people viewed this").
   Reply: say plainly that this needs a change on our side and that you can send it to our team. Never say it was
