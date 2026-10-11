@@ -190,6 +190,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           if (!light) setRun(storeId, { screenshots: [...(chats.state.get(storeId).run?.screenshots ?? []), file] });
         },
         onStep: (text) => (light ? addLightStep(storeId, chatId, text) : addStep(storeId, text, 'look')),
+        cartProduct: () => server.pages?.product ?? null,
       });
       // real addresses of each kind of page, so it can look everywhere its change shows
       server.pages = await samplePages(`http://127.0.0.1:${started.port}`);

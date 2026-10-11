@@ -105,7 +105,7 @@ before is still there.
   return `${reset}The owner's request, as understood from the whole conversation:
 ${task || latest}
 
-${shared ? 'This request is about a shared, store-wide part: changing it is expected. When it names one kind of element everywhere ("all buttons"), cover every one of them, links styled as buttons included; a value they all share is one new variable (e.g. --radius-button) used by each.' : 'This request is about specific elements: do not change existing shared parts (site colours, shared components, header/footer).'}
+${shared ? 'This request is about a shared, store-wide part: changing it is expected. When it names one kind of element everywhere ("all buttons"), cover every one of them, links styled as buttons included (e.g. the cart\'s Checkout): find them all by searching the style files, not only those you see; a value they all share is one new variable (e.g. --radius-button) used by each.' : 'This request is about specific elements: do not change existing shared parts (site colours, shared components, header/footer).'}
 
 The conversation so far (most recent last):
 ${conversation}

@@ -104,7 +104,22 @@ async function loadLazyParts(page) {
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 }
 
-export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport = 'desktop', fullPage = false, scrollTo = null, saveDir, index }) {
+/** Puts one product in the cart (its page, then Add to cart; the store keeps the cart in the browser). */
+async function fillCart(page, productUrl) {
+  await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 120_000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+  // the store saves the cart with requests to its server (a guest cookie): wait until they are all answered
+  let pending = 0;
+  let last = Date.now();
+  page.on('request', () => ((pending += 1), (last = Date.now())));
+  for (const event of ['requestfinished', 'requestfailed']) page.on(event, () => ((pending = Math.max(0, pending - 1)), (last = Date.now())));
+  await page.getByRole('button', { name: /add to cart|أضف إلى السلة|اضف الى السلة/i }).first().dispatchEvent('click').catch(() => {});
+  const until = Date.now() + 20_000;
+  await page.waitForTimeout(800);
+  while (Date.now() < until && (pending > 0 || Date.now() - last < 1500)) await page.waitForTimeout(200);
+}
+
+export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport = 'desktop', fullPage = false, scrollTo = null, saveDir, index, cartProduct = null }) {
   const browser = await pool.get();
   try {
     const shoot = async () => {
@@ -115,6 +130,8 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
       await skipCookieNotice(context);
       try {
         const page = await context.newPage();
+        // an empty cart hides most of the cart page (summary, Checkout): one product goes in first
+        if (cartProduct && /^\/(en|ar)\/cart\/?$/.test(pagePath)) await fillCart(page, new URL(cartProduct, baseUrl).toString());
         // the content is what counts; images and late scripts get a little longer but never block the shot
         await page.goto(new URL(pagePath, baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 120_000 });
         await page.waitForLoadState('load', { timeout: 20_000 }).catch(() => {});
@@ -169,7 +186,7 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
  * The tool server for one run. `baseUrl()` gives the preview's local address (the preview runs while the agent works).
  * `onShot(file)` is told about every saved screenshot, `onStep(text)` about every look (before it is taken).
  */
-export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, onStep = () => {}, shoot = takeScreenshot }) {
+export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, onStep = () => {}, shoot = takeScreenshot, cartProduct = () => null }) {
   let index = 0;
   return createSdkMcpServer({
     name: 'editor',
@@ -192,7 +209,7 @@ export function screenshotServer({ pool, baseUrl, saveDir, onShot = () => {}, on
           try {
             index += 1;
             onStep(`Looking at ${pagePath} on ${args.viewport ?? 'desktop'}`);
-            const shot = await shoot(pool, { baseUrl: await baseUrl(), path: pagePath, viewport: args.viewport ?? 'desktop', fullPage: !!args.fullPage, scrollTo: args.scrollTo ?? null, saveDir, index });
+            const shot = await shoot(pool, { baseUrl: await baseUrl(), path: pagePath, viewport: args.viewport ?? 'desktop', fullPage: !!args.fullPage, scrollTo: args.scrollTo ?? null, saveDir, index, cartProduct: cartProduct() });
             onShot(shot.file);
             return {
               content: [

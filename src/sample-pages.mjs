@@ -18,7 +18,7 @@ export function pagesFromHome(html) {
 
 /** The pages as lines for the AI's instructions. */
 export function pagesText(pages) {
-  const names = { home: 'home', category: 'a category', product: 'a product page', cart: 'the cart (empty until something is added)', arabicHome: 'Arabic home', arabicProduct: 'an Arabic product page' };
+  const names = { home: 'home', category: 'a category', product: 'a product page', cart: 'the cart (shown with one product in it)', arabicHome: 'Arabic home', arabicProduct: 'an Arabic product page' };
   return Object.entries(pages ?? {})
     .map(([kind, path]) => `  - ${names[kind] ?? kind}: ${path}`)
     .join('\n');
