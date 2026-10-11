@@ -64,17 +64,18 @@ export function createStores(config) {
   }
 
   /**
-   * Runs checks in a workspace, in order; stops at the first that fails. `files` (the changed files) fills
-   * `{codeFiles}`; `full` runs the full checks instead of the quick ones.
+   * Runs checks in a workspace, in order; stops at the first that fails. `files` (the changed files) fills `{files}`,
+   * its code files `{codeFiles}`; `full` runs the full checks instead of the quick ones.
    */
   async function check(id, { files = [], full = false } = {}) {
     const cwd = workspaceOf(id);
     const codeFiles = files.filter((f) => /\.(ts|tsx|js|jsx|mjs)$/.test(f));
     for (const [command, template] of full ? config.fullChecks ?? config.checks : config.checks) {
-      if (template.includes('{codeFiles}') && codeFiles.length === 0) continue;
-      const args = template.flatMap((a) => (a === '{codeFiles}' ? codeFiles : [a]));
+      const lists = { '{codeFiles}': codeFiles, '{files}': files };
+      if (template.some((a) => a in lists && lists[a].length === 0)) continue;
+      const args = template.flatMap((a) => (a in lists ? lists[a] : [a]));
       const result = await run(command, args, { cwd });
-      if (result.code !== 0) return { ok: false, step: `${command} ${template.filter((a) => a !== '{codeFiles}').join(' ')}`, output: result.output.slice(-20_000) };
+      if (result.code !== 0) return { ok: false, step: `${command} ${template.filter((a) => !(a in lists)).join(' ')}`, output: result.output.slice(-20_000) };
     }
     return { ok: true, step: null, output: '' };
   }
