@@ -50,7 +50,7 @@ export function splitChoices(text) {
   const items = [];
   while (lines.length && /^\s*(?:\d+[.)]|[-*•])\s+\S/.test(lines.at(-1))) items.unshift(lines.pop().replace(/^\s*(?:\d+[.)]|[-*•])\s+/, '').replace(/\*\*/g, '').trim());
   const rest = lines.join('\n').trim();
-  if (items.length < 2 || items.length > 4 || items.some((item) => item.length > 60) || !/[?؟]\s*$/.test(rest)) return { text, options: [] };
+  if (items.length < 2 || items.length > 4 || items.some((item) => item.length > 60) || !/[?؟:]\s*$/.test(rest)) return { text, options: [] };
   return { text: rest, options: cleanOptions(items) };
 }
 
@@ -155,7 +155,8 @@ For "edit": the job for the AI that edits the code (empty for every other decisi
 against the WHOLE conversation (the owner's latest message is often a short answer to an earlier question, e.g. "make it
 an icon" after asking about the Add to Cart button means the Add to Cart button). Say exactly what changes, where
 (which page, which element, e.g. "the Add to Cart buttons on the product cards in listings and rails") and what must
-stay as it is. Never leave out the element the conversation is about.
+stay as it is. Never leave out the element the conversation is about, nor any part of the request (in "make the cart
+cleaner: summary on the right", "cleaner" is a job too, even when the summary is already on the right).
 "shared": for "edit" only. true when the owner asks for something that is the same across the whole store: the main
 or brand colours, fonts, an icon everywhere it appears, and ANY element of the page frame that shows on every page — the
 header and anything in it (logo, search box, header icons), the announcement bar, the menus, the footer and anything in

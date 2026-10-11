@@ -12,6 +12,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { explainPrompt, fixPrompt, lookPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
 import { admitsUnchecked, missingLooks } from './looks.mjs';
 import { samplePages } from './sample-pages.mjs';
+import { onlyExtends } from './shared-diff.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
 import { cleanOptions, splitChoices } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
@@ -127,10 +128,17 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     await git(['add', '-A'], cwd);
     const rows = (await git(['diff', '--cached', '--numstat', 'HEAD'], cwd)).split('\n').filter(Boolean);
     await git(['reset', '-q'], cwd);
-    return rows
+    const touched = rows
       .map((row) => row.split('\t'))
       .filter(([, deleted]) => deleted === '-' || Number(deleted) > 0)
       .map(([, , file]) => file);
+    // a line that comes back extended (one more icon name in a list) is an addition, not a change
+    const changed = [];
+    for (const file of touched) {
+      const diff = (await run('git', ['diff', '-U0', 'HEAD', '--', file], { cwd })).output ?? '';
+      if (!diff || !onlyExtends(diff)) changed.push(file);
+    }
+    return changed;
   }
 
   /** One Agent SDK call; returns the final message and what it cost beyond what the session had already spent. */
