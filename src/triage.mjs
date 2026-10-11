@@ -97,7 +97,10 @@ Decide one of:
 - "go_ahead": a plan is waiting for the owner's OK (see "Plan waiting" below) and this message accepts it as it is
   ("yes", "go ahead", "ok do it", "تمام", "نعم"). If they accept but also change something, that is a new "edit".
 - "help": a question about using the AI Designer itself (where is the preview, how to see a change, how to approve
-  or undo, what it can do, the allowance). Answer it from the facts above, short.
+  or undo, what it can do, the allowance). Answer it from the facts above, short. Questions about the change it just
+  made ("why did you change that?", "what did you change?", "what file?") are "help" too: answer from the conversation
+  in plain words — what changed for the shopper, where, and why that was the way to do what they asked — without a
+  question back and without file names or code.
 - "admin_setting": something the owner changes in their dashboard (prices, products, stock, discounts, coupons,
   delivery fees, payment methods, store switches, banners/sliders content, menus content, static pages content).
   These storefront parts are added, switched on/off and worded in the dashboard (the place is named for each).
