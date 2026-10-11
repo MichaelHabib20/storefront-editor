@@ -112,11 +112,12 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
   }
 
   /** One Agent SDK call; returns the final message and what it cost beyond what the session had already spent. */
-  async function agentTurn(storeId, chatId, { prompt, images = [], model, settings, maxBudgetUsd, cwd, eyes = null }) {
+  async function agentTurn(storeId, chatId, { prompt, images = [], model, settings, maxBudgetUsd, cwd, eyes = null, large = false }) {
     const chat = chats.get(storeId, chatId);
     // a turn that hangs (a stuck tool, a stuck preview) ends instead of holding the store forever
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), config.turnTimeoutMs ?? 10 * 60_000);
+    // a store-wide change (many parts to edit and look at) gets twice the time
+    const timer = setTimeout(() => abort.abort(), (config.turnTimeoutMs ?? 10 * 60_000) * (large ? 2 : 1));
     const stream = query({
       prompt: promptWithImages(prompt, images),
       options: {
@@ -644,7 +645,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const undone = !!chats.get(storeId, chatId).editsUndone;
       if (undone) chats.update(storeId, chatId, (c) => (c.editsUndone = false));
       const prompt = taskPrompt({ task: job.task, latest: text, recent: chats.recent(storeId, chatId, 12), shared: job.shared, pictures: job.images.length, undone });
-      let turn = await agentTurn(storeId, chatId, { prompt, images: job.images, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
+      let turn = await agentTurn(storeId, chatId, { prompt, images: job.images, model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes, large: job.large });
       charge(turn.charge, true);
 
       let looked = false;
@@ -661,7 +662,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           log('looked', storeId, runId, missing.length ? `missing ${missing.join(', ')}` : 'phone and desktop', admitted ? 'but says it did not check something' : '');
           if (missing.length || admitted) {
             phase('editing', 'Looking at the change on phone and desktop', { model });
-            turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing.length ? missing : ['phone', 'desktop'], admitted), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
+            turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing.length ? missing : ['phone', 'desktop'], admitted), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes, large: job.large });
             charge(turn.charge, true);
             if (turn.subtype === 'error_max_budget_usd') throw new ChangeError('budget_stop', 'This request needed more than one request may spend.');
             if (turn.subtype !== 'success') throw new ChangeError('agent_failed', `The agent stopped (${turn.subtype}).`);
@@ -731,7 +732,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         setRun(storeId, { lastFailure: { round, step: failure.step, output: String(failure.output ?? '').slice(-4000) } });
         if (round >= settings.maxFixRounds) throw new ChangeError('checks_failed', `Still failing after ${round} fix rounds (${failure.step}).`);
         phase('fixing', 'Fixing a problem the checks found', { round: round + 1 });
-        turn = await agentTurn(storeId, chatId, { prompt: fixPrompt(failure.step, failure.output), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
+        turn = await agentTurn(storeId, chatId, { prompt: fixPrompt(failure.step, failure.output), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes, large: job.large });
         charge({ ...turn.charge, kind: 'fix' }, true);
       }
     } catch (error) {
@@ -745,8 +746,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
       const unreachable = /ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|Can't reach the API|overloaded|rate.?limit|\b52\d\b/i.test(String(error?.message ?? error));
       if (unreachable) outcome = 'ai_unreachable';
       const reply =
-        outcome === 'budget_stop'
-          ? said(text, 'This change is bigger than one request allows. Could you ask for a smaller part of it first?', 'هذا التغيير أكبر مما يسمح به طلب واحد. هل يمكنك أن تطلب جزءًا أصغر منه أولًا؟')
+        outcome === 'budget_stop' || outcome === 'timeout'
+          ? said(text, 'This change is bigger than one request allows, so nothing was changed. Could you ask for a part of it first (for example one page or one kind of button)? You were not charged.', 'هذا التغيير أكبر مما يسمح به طلب واحد، لذلك لم يتغير شيء. هل يمكنك أن تطلب جزءًا منه أولًا (مثل صفحة واحدة أو نوع واحد من الأزرار)؟ لم يتم احتساب أي تكلفة.')
           : unreachable
             ? said(text, 'I could not reach the AI service just now, so nothing was changed. Please send your message again in a minute. You were not charged.', 'تعذّر عليّ الوصول إلى خدمة الذكاء الاصطناعي الآن، لذلك لم يتغير شيء. يرجى إرسال رسالتك مرة أخرى بعد دقيقة. لم يتم احتساب أي تكلفة.')
             : said(text, 'I could not make this change safely, so nothing was changed. You were not charged for it.', 'لم أتمكن من تنفيذ هذا التغيير بأمان، لذلك لم يتغير شيء. لم يتم احتساب أي تكلفة.');
