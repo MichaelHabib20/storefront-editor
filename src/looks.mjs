@@ -22,3 +22,14 @@ export async function missingLooks(cwd, changed, shotsDir) {
   }
   return VIEWS.filter((view) => !seen.has(view));
 }
+
+const UNCHECKED = [
+  /\b(?:didn['’]t|did not|haven['’]t|have not|couldn['’]t|could not|wasn['’]t able to)\s+(?:yet\s+)?(?:check|look|open|view|see|test)/i,
+  /\bnot (?:checked|viewed|looked at)\b/i,
+  /لم أتحقق|لم أتمكن من (?:التحقق|الفحص|رؤية)|لم أفحص|لم أنظر|لم أفتح/,
+];
+
+/** The AI's message says it did not look at something (then it looks now instead of telling the owner). */
+export function admitsUnchecked(text) {
+  return UNCHECKED.some((pattern) => pattern.test(String(text ?? '')));
+}

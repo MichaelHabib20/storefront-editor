@@ -32,6 +32,8 @@ ${DASHBOARD_PLACES}
   shade of the asked colour when needed and say so), on phone and desktop. That is part of the same
   change, not a new request: do it, then say it in one short line ("I made the menu words white so they stay easy to
   read"). The same for size and spacing: nothing may overlap, be cut off or become too small to tap.
+- "On phones only" means screens narrower than 768px: put it in a (max-width: 767px) block, never in a base rule that
+  tablets also use; "on desktop only" means 1024px and wider. Same for the opposite.
 - Only the parts the request names may look different afterwards. To change a store-wide font or colour, change the
   existing variable that those parts already use (e.g. the heading font variable); never add broad rules on plain
   elements (h1-h6, p, a, button, *) that would restyle other things too (e.g. product names that are headings in the
@@ -115,12 +117,12 @@ right the first time: what changed for the owner and where to look. The end of t
 }
 
 /** The editing AI ended without seeing its change at every screen size: one more turn to look (and fix). */
-export function lookPrompt(missing) {
-  return `Before the owner sees it: you have not looked at your change on ${missing.join(' and ')} since your last edit.
+export function lookPrompt(missing, admitted = false) {
+  return `Before the owner sees it: ${admitted ? 'your message says you did not check some pages or screen sizes. Check them now instead of telling the owner.' : `you have not looked at your change on ${missing.join(' and ')} since your last edit.`}
 Take screenshots now on ${missing.join(' and ')} of every kind of page where the change shows (and the Arabic page when
 it moves or sizes things). Check that it shows what the owner asked for, that every text and icon there is easy to
 read and that nothing overlaps or is cut off. Fix anything wrong. Then write your final message for the owner again,
-saying only what you saw.`;
+saying only what you saw; never list what you did not check.`;
 }
 
 const DIAGNOSE_RULES = `You find out why something is broken on one shop's online storefront (the current directory is its Next.js

@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { explainPrompt, fixPrompt, lookPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
-import { missingLooks } from './looks.mjs';
+import { admitsUnchecked, missingLooks } from './looks.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
 import { cleanOptions, splitChoices } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
@@ -653,10 +653,11 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         if (eyes && !looked && changed.length) {
           looked = true;
           const missing = await missingLooks(cwd, changed, path.join(config.dataDir, 'runs', runId));
-          log('looked', storeId, runId, missing.length ? `missing ${missing.join(', ')}` : 'phone and desktop');
-          if (missing.length) {
+          const admitted = admitsUnchecked(turn.text);
+          log('looked', storeId, runId, missing.length ? `missing ${missing.join(', ')}` : 'phone and desktop', admitted ? 'but says it did not check something' : '');
+          if (missing.length || admitted) {
             phase('editing', 'Looking at the change on phone and desktop', { model });
-            turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
+            turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing.length ? missing : ['phone', 'desktop'], admitted), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes });
             charge(turn.charge, true);
             if (turn.subtype === 'error_max_budget_usd') throw new ChangeError('budget_stop', 'This request needed more than one request may spend.');
             if (turn.subtype !== 'success') throw new ChangeError('agent_failed', `The agent stopped (${turn.subtype}).`);

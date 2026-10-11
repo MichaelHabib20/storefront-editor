@@ -32,3 +32,9 @@ test('a change counts as seen only on the sizes shot after the last edit', async
   // a deleted file and a missing folder do not break it
   assert.deepEqual(await missingLooks(cwd, ['src/gone.css'], path.join(dir, 'none')), ['phone', 'desktop']);
 });
+
+test('a message that admits it did not check something is caught', async () => {
+  const { admitsUnchecked } = await import('../src/looks.mjs');
+  for (const text of ["I didn't check the phone view or the Arabic page.", 'I did not open a product page.', "I haven't looked at the Arabic page.", 'These pages were not viewed? no: Also changed, not viewed.', 'لم أتحقق من صفحة الهاتف.']) assert.ok(admitsUnchecked(text), text);
+  for (const text of ['I checked the phone and desktop previews.', 'Nothing overlaps or gets cut off.', 'The logo did not change on desktop.']) assert.ok(!admitsUnchecked(text), text);
+});
