@@ -3,6 +3,7 @@
  * starter update that improves the Skill reaches the agent too).
  */
 import { DASHBOARD_PLACES } from './dashboard-places.mjs';
+import { pagesText } from './sample-pages.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -72,14 +73,17 @@ Looking at the store (you have a screenshot tool on the live preview of this cop
 const NO_EYES = `
 You cannot see the store in this run: describe what you changed, without claiming how it looks.`;
 
-export function systemPrompt(workspace, { eyes = false } = {}) {
+export function systemPrompt(workspace, { eyes = false, pages = null } = {}) {
   let skill = '';
   try {
     skill = fs.readFileSync(path.join(workspace, SKILL, 'SKILL.md'), 'utf8').replace(/^---[\s\S]*?---\s*/, '');
   } catch {
     // a starter without the Skill (tests)
   }
-  return `${RULES}\n${eyes ? EYES : NO_EYES}\n\n# Storefront rules\n\n${skill}`;
+  const where = eyes && pages
+    ? `\nPages of this store to look at (each kind where the change shows, on phone and desktop):\n${pagesText(pages)}\nOn Arabic pages the labels are in Arabic: use fullPage or an Arabic label to find a part.\n`
+    : '';
+  return `${RULES}\n${eyes ? EYES : NO_EYES}${where}\n\n# Storefront rules\n\n${skill}`;
 }
 
 /**

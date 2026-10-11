@@ -11,6 +11,7 @@ import path from 'node:path';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { explainPrompt, fixPrompt, lookPrompt, systemPrompt, taskPrompt } from './prompt.mjs';
 import { admitsUnchecked, missingLooks } from './looks.mjs';
+import { samplePages } from './sample-pages.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
 import { cleanOptions, splitChoices } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
@@ -132,7 +133,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         permissionPrompts: 'none',
         settingSources: [],
         strictMcpConfig: true,
-        systemPrompt: systemPrompt(cwd, { eyes: !!eyes }),
+        systemPrompt: systemPrompt(cwd, { eyes: !!eyes, pages: eyes?.pages }),
         ...(chat.sessionId ? { resume: chat.sessionId } : {}),
         env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
         hooks: { PreToolUse: [{ hooks: [fileGuard(cwd, policy)] }] },
@@ -178,8 +179,8 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
     try {
       // a run that only talks (another chat may hold the build) keeps its steps on its own chat
       if (!light) setRun(storeId, { state: 'building_preview' });
-      await previews.start(storeId);
-      return screenshotServer({
+      const started = await previews.start(storeId);
+      const server = screenshotServer({
         pool: browsers,
         // checked before every shot: a hung dev server is restarted instead of blinding the agent
         baseUrl: async () => `http://127.0.0.1:${await previews.ensure(storeId)}`,
@@ -189,6 +190,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         },
         onStep: (text) => (light ? addLightStep(storeId, chatId, text) : addStep(storeId, text, 'look')),
       });
+      // real addresses of each kind of page, so it can look everywhere its change shows
+      server.pages = await samplePages(`http://127.0.0.1:${started.port}`);
+      return server;
     } catch (error) {
       log('no screenshots for this run', storeId, runId, error.message);
       return null;
