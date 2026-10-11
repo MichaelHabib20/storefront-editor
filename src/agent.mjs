@@ -706,7 +706,9 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
               // a second change on an open draft stays under the chat that began it
               state.draft = { branch: draftOf(storeId), commit, updatedAt: new Date().toISOString(), chatId: state.draft?.chatId ?? chatId };
             });
-            chats.say(storeId, chatId, 'assistant', turn.text || 'Done. Have a look at the preview.', { runId, preview: preview.url });
+            // a follow-up question ending with short choices: the choices become tap buttons
+            const done = splitChoices(turn.text || 'Done. Have a look at the preview.');
+            chats.say(storeId, chatId, 'assistant', done.text, { runId, preview: preview.url, ...(done.options.length ? { options: done.options } : {}) });
             outcome = 'preview';
             if (job.recheck) await announceRecheck(storeId, chatId, runId, text, job.recheck);
             if (job.then) {

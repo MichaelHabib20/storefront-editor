@@ -65,8 +65,23 @@ export function createBrowserPool({ launch = async () => (await import('playwrig
  */
 /** Closes the cookie banner if it covers the page (English or Arabic button). */
 export async function acceptCookies(page) {
+  // the notice shows a moment after the page loads: wait a little for it
   const button = page.getByRole('button', { name: /^(accept|accept all|قبول|موافق)$/i }).first();
-  if (await button.isVisible({ timeout: 1000 }).catch(() => false)) await button.click({ timeout: 2000 }).catch(() => {});
+  await button
+    .waitFor({ state: 'visible', timeout: 2500 })
+    .then(() => button.click({ timeout: 2000 }))
+    .catch(() => {});
+}
+
+/** The store's cookie notice counts as answered before any page opens (it would cover the bottom of every shot). */
+export async function skipCookieNotice(context) {
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('sc_cookie_consent', 'accepted');
+    } catch {
+      // a page without storage
+    }
+  });
 }
 
 /** Waits (up to 20 s) until the page shows real content, not a blank page that is still being built. */
@@ -97,6 +112,7 @@ export async function takeScreenshot(pool, { baseUrl, path: pagePath, viewport =
       // a phone-emulated page shot whole is laid out again at the full size (rails spill, fixed bars move): the whole
       // page is shot at the phone's width without the emulation instead
       const context = await browser.newContext({ viewport: { width: VIEWPORTS[viewport].width, height: VIEWPORTS[viewport].height }, isMobile: whole ? false : VIEWPORTS[viewport].isMobile, deviceScaleFactor: whole ? 1 : VIEWPORTS[viewport].deviceScaleFactor });
+      await skipCookieNotice(context);
       try {
         const page = await context.newPage();
         // the content is what counts; images and late scripts get a little longer but never block the shot

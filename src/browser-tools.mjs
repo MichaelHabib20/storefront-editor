@@ -13,7 +13,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { VIEWPORTS, acceptCookies, safePreviewPath, waitForContent } from './screenshot.mjs';
+import { VIEWPORTS, acceptCookies, safePreviewPath, skipCookieNotice, waitForContent } from './screenshot.mjs';
 
 export const OPEN_PAGE_TOOL = 'mcp__editor__open_page';
 export const ACT_TOOL = 'mcp__editor__act';
@@ -90,6 +90,7 @@ export async function browse(pool, { baseUrl, path: pagePath, viewport = 'deskto
   const origin = new URL(baseUrl).origin;
   const browser = await pool.get();
   const context = await browser.newContext({ viewport: { width: VIEWPORTS[viewport].width, height: VIEWPORTS[viewport].height }, isMobile: VIEWPORTS[viewport].isMobile, deviceScaleFactor: VIEWPORTS[viewport].deviceScaleFactor });
+  await skipCookieNotice(context);
   try {
     const page = await context.newPage();
     const consoleErrors = [];
