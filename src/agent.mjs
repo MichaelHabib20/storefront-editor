@@ -55,15 +55,37 @@ export function fileGuard(workspace, policy) {
 }
 
 /** The question when a change would reach shared, store-wide parts; in Arabic when the owner writes Arabic. */
-export function askShared(ownerText) {
-  if (/[؀-ۿ]/.test(ownerText)) {
+// shared parts in the owner's words (English, Arabic), by file
+const SHARED_NAMES = [
+  [/^src\/app\/globals\.css$/, 'the site colours and styles', 'ألوان الموقع وأنماطه'],
+  [/^src\/components\/ui\/Rail/, 'the scrolling rows (products, categories, brands)', 'الصفوف المتحركة (المنتجات والأقسام والماركات)'],
+  [/^src\/components\/ui\/Icon/, 'the icons', 'الأيقونات'],
+  [/^src\/components\/layout\/(SiteHeader|DesktopNav|MobileMenu|SearchBox|TopBar)/, 'the header', 'رأس الصفحة'],
+  [/^src\/components\/layout\/SiteFooter/, 'the footer', 'أسفل الصفحة'],
+  [/^src\/components\/layout\/MobileBottomNav/, 'the bottom menu on phones', 'القائمة السفلية على الهاتف'],
+  [/^src\/components\/layout\//, 'the page frame (header, footer, menus)', 'إطار الصفحة (الرأس والأسفل والقوائم)'],
+  [/^src\/components\/ui\//, 'a building block used on many pages', 'جزء مشترك يظهر في صفحات كثيرة'],
+];
+
+/** The question when a change needs shared parts the request did not name: which parts, in plain words. */
+export function askShared(ownerText, files = []) {
+  const arabic = /[؀-ۿ]/.test(ownerText);
+  const names = [];
+  for (const file of files) {
+    const found = SHARED_NAMES.find(([pattern]) => pattern.test(file));
+    const name = found ? found[arabic ? 2 : 1] : null;
+    if (name && !names.includes(name)) names.push(name);
+  }
+  if (arabic) {
+    const parts = names.length ? names.join(' و') : 'أجزاء مشتركة';
     return {
-      text: 'هذا التعديل سيغيّر أيضًا أجزاء مشتركة تظهر في كل المتجر (مثل الأيقونات أو ألوان الموقع)، وليس فقط ما طلبته. هل أطبّقه في كل مكان، أم فقط حيث طلبت؟',
+      text: `هذا التعديل يحتاج أيضًا إلى تغيير ${parts}، وهي تظهر في صفحات كثيرة وليس فقط حيث طلبت. هل أطبّقه في كل مكان، أم فقط حيث طلبت؟`,
       options: ['نعم، في كل مكان', 'لا، فقط حيث طلبت'],
     };
   }
+  const parts = names.length ? names.join(' and ') : 'parts that are shared across the store';
   return {
-    text: 'This change would also change parts used across your whole store (like the icons or the site colours), not only what you asked for. Should I change it everywhere, or only where you asked?',
+    text: `This change also needs to change ${parts}, which show on many pages, not only where you asked. Should I change it everywhere, or only where you asked?`,
     options: ['Yes, everywhere', 'No, only where I asked'],
   };
 }
@@ -687,7 +709,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           await resetWorkspace(cwd);
           markUndone(storeId, chatId);
           setPending(storeId, chatId, { task: job.task, large: job.large, shared: true, images: pendingRefs });
-          const question = askShared(text);
+          const question = askShared(text, sharedTouched);
           chats.say(storeId, chatId, 'assistant', question.text, { runId, kind: 'plan', options: question.options });
           outcome = 'needs_confirmation';
           return;
