@@ -688,7 +688,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           log('looked', storeId, runId, missing.length ? `missing ${missing.join(', ')}` : 'phone and desktop', admitted ? 'but says it did not check something' : '');
           if (missing.length || admitted) {
             phase('editing', 'Looking at the change on phone and desktop', { model });
-            turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing.length ? missing : ['phone', 'desktop'], admitted), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes, large: job.large });
+            turn = await agentTurn(storeId, chatId, { prompt: lookPrompt(missing.length ? missing : ['phone', 'desktop'], admitted, { arabic: /[؀-ۿ]/.test(text) }), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes, large: job.large });
             charge(turn.charge, true);
             if (turn.subtype === 'error_max_budget_usd') throw new ChangeError('budget_stop', 'This request needed more than one request may spend.');
             if (turn.subtype !== 'success') throw new ChangeError('agent_failed', `The agent stopped (${turn.subtype}).`);
@@ -758,7 +758,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         setRun(storeId, { lastFailure: { round, step: failure.step, output: String(failure.output ?? '').slice(-4000) } });
         if (round >= settings.maxFixRounds) throw new ChangeError('checks_failed', `Still failing after ${round} fix rounds (${failure.step}).`);
         phase('fixing', 'Fixing a problem the checks found', { round: round + 1 });
-        turn = await agentTurn(storeId, chatId, { prompt: fixPrompt(failure.step, failure.output), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes, large: job.large });
+        turn = await agentTurn(storeId, chatId, { prompt: fixPrompt(failure.step, failure.output, { arabic: /[؀-ۿ]/.test(text) }), model, settings, maxBudgetUsd: reservation.amountUsd - spent, cwd, eyes, large: job.large });
         charge({ ...turn.charge, kind: 'fix' }, true);
       }
     } catch (error) {

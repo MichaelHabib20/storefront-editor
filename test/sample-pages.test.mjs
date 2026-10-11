@@ -11,3 +11,10 @@ test('the pages to look at come from the home page links; missing kinds are left
   assert.match(systemPrompt('nowhere', { eyes: true, pages: pagesFromHome(html) }), /Pages of this store to look at[\s\S]*\/ar\/jj-bath-500ml/);
   assert.doesNotMatch(systemPrompt('nowhere', { eyes: false, pages: pagesFromHome(html) }), /Pages of this store/);
 });
+
+test('follow-up turns (look again, fix) ask for the final message in the owner\'s language', async () => {
+  const { lookPrompt, fixPrompt } = await import('../src/prompt.mjs');
+  assert.match(lookPrompt(['phone'], false, { arabic: true }), /final message in Arabic/);
+  assert.match(lookPrompt(['phone']), /final message in English/);
+  assert.match(fixPrompt('lint', 'x', { arabic: true }), /final message in Arabic/);
+});

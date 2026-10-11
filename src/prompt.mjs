@@ -119,19 +119,22 @@ Do exactly the request above, on the element it names. If it is still unclear wh
 question instead of changing anything.`;
 }
 
-export function fixPrompt(step, output) {
+/** The language the owner wrote in, for a follow-up turn (the AI must not switch to the language of our instructions). */
+const inLanguage = (arabic) => `Write that final message in ${arabic ? 'Arabic' : 'English'}, the language of the owner's message.`;
+
+export function fixPrompt(step, output, { arabic = false } = {}) {
   return `The editor ran the checks and "${step}" failed. Fix the cause (do not weaken or delete checks or tests). The owner
 never sees the checks: your final message must not mention them, this fix, errors or code. Write it as if all went
-right the first time: what changed for the owner and where to look. The end of the output:\n\n${output.slice(-6000)}`;
+right the first time: what changed for the owner and where to look. ${inLanguage(arabic)} The end of the output:\n\n${output.slice(-6000)}`;
 }
 
 /** The editing AI ended without seeing its change at every screen size: one more turn to look (and fix). */
-export function lookPrompt(missing, admitted = false) {
+export function lookPrompt(missing, admitted = false, { arabic = false } = {}) {
   return `Before the owner sees it: ${admitted ? 'your message says you did not check some pages or screen sizes. Check them now instead of telling the owner.' : `you have not looked at your change on ${missing.join(' and ')} since your last edit.`}
 Take screenshots now on ${missing.join(' and ')} of every kind of page where the change shows (and the Arabic page when
 it moves or sizes things). Check that it shows what the owner asked for, that every text and icon there is easy to
 read and that nothing overlaps or is cut off. Fix anything wrong. Then write your final message for the owner again,
-saying only what you saw; never list what you did not check.`;
+saying only what you saw; never list what you did not check. ${inLanguage(arabic)}`;
 }
 
 const DIAGNOSE_RULES = `You find out why something is broken on one shop's online storefront (the current directory is its Next.js
