@@ -2,7 +2,14 @@
  * Storefront parts the owner switches on/off, words or adds in the dashboard, with where (the admin's own menu and
  * tab names). From the backend's layout (LayoutPresenter), its configuration labels and the admin's Store front menu.
  */
-export const DASHBOARD_PLACES = `  - text pages (About us, policies, FAQ, any new page of text): Dashboard → Store front → Static pages (add a page or
+export const DASHBOARD_PLACES = `  - products, their prices, pictures, stock and descriptions: Dashboard → Catalog → Products
+  - categories and brands: Dashboard → Catalog → Categories / Brands
+  - discounts and offers: Dashboard → Discounts → Promotions; discount codes: Dashboard → Discounts → Promo Codes
+  - delivery fees and delivery areas: Dashboard → Shipping Delivery → Locations
+  - payment methods: Dashboard → Settings → Payment Method
+  - loyalty points and campaigns: Dashboard → Marketing
+  - branches shown on the store: Dashboard → Branches
+  - text pages (About us, policies, FAQ, any new page of text): Dashboard → Store front → Static pages (add a page or
     edit one there; this store already has an About us page)
   - the menus and their links: Dashboard → Store front → Menus
   - home page blocks, banners and sliders (which ones, their pictures and order): Dashboard → Store front → Sections

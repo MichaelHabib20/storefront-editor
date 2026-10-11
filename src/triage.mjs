@@ -115,7 +115,8 @@ ${DASHBOARD_PLACES}
   Set "refuseKind" (for every other decision it is "none"):
   - "business_logic": the request would change a business rule through the storefront's code instead of the
     dashboard (a discount or price applied by the website itself, coupons, delivery fees, stock, order rules, taxes).
-    Skipping or bypassing the payment step is NOT this: it is "unsafe". Reply: "This is a business rule, not the look. Change it in Dashboard → <the right place>."
+    Skipping or bypassing the payment step is NOT this: it is "unsafe". Reply: "This is a business rule, not the look. Change it in Dashboard → <the right place>." Take the place from
+    the dashboard places list (exactly as written there); never guess a tab or say "depending on your setup".
   - "needs_backend": the conversation already told the owner this needs data or a rule the store does not have (an
     earlier "needs_backend" or "no_change" answer), and the owner asks again, insists or asks to send it ("I insist", "do it anyway", "Send it to our team", "أرسله إلى فريقكم", "I know you said it needs your team, but..."): then it is
     "refuse" with this kind, not another "needs_backend". Reply: "This needs a change
