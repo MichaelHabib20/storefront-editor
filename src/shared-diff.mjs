@@ -14,6 +14,7 @@ export function onlyExtends(diff) {
   const stem = (line) => line.trimEnd().replace(/[,;{(]\s*$/, '').trimEnd();
   return removed.every((line) => {
     const start = stem(line);
-    return start.length > 0 && added.some((a) => a.trimEnd().startsWith(start) && a.trim().length > line.trim().length);
+    // the line itself stays (perhaps without the `;` or `,` that moved to the new last item)
+    return start.length > 0 && added.some((a) => a.trimEnd().startsWith(start));
   });
 }
