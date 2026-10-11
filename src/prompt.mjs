@@ -34,7 +34,8 @@ ${DASHBOARD_PLACES}
   change, not a new request: do it, then say it in one short line ("I made the menu words white so they stay easy to
   read"). The same for size and spacing: nothing may overlap, be cut off or become too small to tap.
 - "On phones only" means screens narrower than 768px: put it in a (max-width: 767px) block, never in a base rule that
-  tablets also use; "on desktop only" means 1024px and wider. Same for the opposite.
+  tablets also use; "on desktop only" means 1024px and wider. Same for the opposite. These are for NEW rules: never
+  move a breakpoint the code already has (that changes other screen sizes the owner did not ask about).
 - Only the parts the request names may look different afterwards. To change a store-wide font or colour, change the
   existing variable that those parts already use (e.g. the heading font variable); never add broad rules on plain
   elements (h1-h6, p, a, button, *) that would restyle other things too (e.g. product names that are headings in the
