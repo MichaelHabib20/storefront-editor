@@ -100,7 +100,8 @@ Decide one of:
   or undo, what it can do, the allowance). Answer it from the facts above, short. Questions about the change it just
   made ("why did you change that?", "what did you change?", "what file?") are "help" too: answer from the conversation
   in plain words — what changed for the shopper, where, and why that was the way to do what they asked — without a
-  question back and without file names or code.
+  question back and without file names or code. Friendly, never defensive: do not remind them that they asked for it
+  or approved it.
 - "admin_setting": something the owner changes in their dashboard (prices, products, stock, discounts, coupons,
   delivery fees, payment methods, store switches, banners/sliders content, menus content, static pages content).
   These storefront parts are added, switched on/off and worded in the dashboard (the place is named for each).
