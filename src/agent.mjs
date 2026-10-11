@@ -735,10 +735,15 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         await resetWorkspace(cwd).catch(() => {});
         markUndone(storeId, chatId);
       }
+      // the AI service out of reach (network, overload) is not the change's fault: say so, so the owner simply retries
+      const unreachable = /ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|Can't reach the API|overloaded|rate.?limit|\b52\d\b/i.test(String(error?.message ?? error));
+      if (unreachable) outcome = 'ai_unreachable';
       const reply =
         outcome === 'budget_stop'
-          ? 'This change is bigger than one request allows. Could you ask for a smaller part of it first?'
-          : 'I could not make this change safely, so nothing was changed. You were not charged for it.';
+          ? said(text, 'This change is bigger than one request allows. Could you ask for a smaller part of it first?', 'هذا التغيير أكبر مما يسمح به طلب واحد. هل يمكنك أن تطلب جزءًا أصغر منه أولًا؟')
+          : unreachable
+            ? said(text, 'I could not reach the AI service just now, so nothing was changed. Please send your message again in a minute. You were not charged.', 'تعذّر عليّ الوصول إلى خدمة الذكاء الاصطناعي الآن، لذلك لم يتغير شيء. يرجى إرسال رسالتك مرة أخرى بعد دقيقة. لم يتم احتساب أي تكلفة.')
+            : said(text, 'I could not make this change safely, so nothing was changed. You were not charged for it.', 'لم أتمكن من تنفيذ هذا التغيير بأمان، لذلك لم يتغير شيء. لم يتم احتساب أي تكلفة.');
       chats.say(storeId, chatId, 'assistant', reply, { runId, error: outcome });
     } finally {
       // the run always ends: a broken cost figure is logged and charged as 0, never left hanging

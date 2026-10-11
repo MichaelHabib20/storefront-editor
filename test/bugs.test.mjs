@@ -426,3 +426,19 @@ test('a question from the editing AI that ends with short numbered choices shows
   const long = `Which?\n1. ${'x'.repeat(61)}\n2. b`;
   assert.deepEqual(splitChoices(long), { text: long, options: [] });
 });
+
+test('the AI service out of reach says so (in the owner\'s language) instead of "could not make this change safely"', async () => {
+  const chat = await newChat();
+  triageAnswer = { decision: 'edit', reply: '', task: 'Make the header blue', confirm: false, large: false, shared: true, refuseKind: 'none', title: '', options: [] };
+  agentScript = [() => {
+    throw new Error("Claude Code returned an error result: API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)");
+  }];
+  let v = await sendAndWait(chat, 'make the header blue');
+  assert.match(v.messages.at(-1).text, /could not reach the AI service just now/);
+  assert.equal(app.chats.state.get('acme').run.outcome, 'ai_unreachable');
+  agentScript = [() => {
+    throw new Error('getaddrinfo EAI_AGAIN api.anthropic.com');
+  }];
+  v = await sendAndWait(chat, 'اجعل الهيدر أزرق');
+  assert.match(v.messages.at(-1).text, /تعذّر عليّ الوصول/);
+});
