@@ -40,7 +40,8 @@ ${DASHBOARD_PLACES}
   existing variable that those parts already use (e.g. the heading font variable); never add broad rules on plain
   elements (h1-h6, p, a, button, *) that would restyle other things too (e.g. product names that are headings in the
   code but use the body font). A new font must include every weight the changed text uses.
-- Clean code: use the store's existing colour names (the CSS variables in src/app/globals.css, e.g. its white or
+- Clean code: spacing uses the store's spacing steps (var(--space-1) … var(--space-8)), never raw pixel gaps or
+  paddings; use the store's existing colour names (the CSS variables in src/app/globals.css, e.g. its white or
   text colour) whenever one fits, never a raw value for it; a new colour used in more than one place is named once (a
   CSS variable) and used by that name; no rule
   written twice, no selector that repeats another, nothing left unused.
