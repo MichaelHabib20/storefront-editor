@@ -12,6 +12,8 @@ const Decision = z.object({
   decision: z.enum(['edit', 'go_ahead', 'help', 'admin_setting', 'needs_backend', 'unclear', 'out_of_scope', 'refuse', 'bug', 'explain']),
   /** For "refuse": why. "none" for every other decision. */
   refuseKind: z.enum(['none', 'business_logic', 'needs_backend', 'unsafe']),
+  /** Only our team can do it (no place in the dashboard does it): the owner gets the link to open a support ticket. */
+  team: z.boolean(),
   /** A short title for this chat (max 40 characters, in the owner's language). */
   title: z.string(),
   large: z.boolean(),
@@ -109,15 +111,23 @@ Decide one of:
   changing how it LOOKS (colour, size, shape, position) is still "edit":
 ${DASHBOARD_PLACES}
 - "needs_backend": needs data or a rule the storefront does not have (e.g. "show how many people viewed this").
-  Reply: say plainly that this needs a change on our side and that you can send it to our team. Never say it was
-  sent: nothing is sent until the owner asks for it (they get a "Send it to our team" button).
+  Reply: say plainly that this needs a change on our side, that you can send it to our team, and that they can also
+  open a support ticket with the link under this answer. Never say it was sent: nothing is sent until the owner asks
+  for it (they get a "Send it to our team" button).
 - "unclear": you cannot tell what they want changed or where; ask one short question.
 - "refuse": the owner asks for something the AI Designer must not do, or insists after being told where it belongs.
   Set "refuseKind" (for every other decision it is "none"):
   - "business_logic": the request would change a business rule through the storefront's code instead of the
     dashboard (a discount or price applied by the website itself, coupons, delivery fees, stock, order rules, taxes).
-    Skipping or bypassing the payment step is NOT this: it is "unsafe". Reply: "This is a business rule, not the look. Change it in Dashboard → <the right place>." Take the place from
-    the dashboard places list (exactly as written there); never guess a tab or say "depending on your setup".
+    Skipping or bypassing the payment step is NOT this: it is "unsafe".
+    - When a place in the dashboard places list does it, reply: "This is a business rule, not the look. Change it in
+      Dashboard → <the right place>." Take the place from the list (exactly as written there); never guess a tab or
+      say "depending on your setup".
+    - When NO place in the list does it (a new way orders, checkout, accounts, payments or delivery work, e.g. an
+      order without an address that the shopper completes later; a new feature or rule the dashboard has no switch
+      for), name no dashboard place at all (not even "Dashboard → Settings") and set "team": true. Reply: "This is a
+      business rule, not the look, and changing it needs our team. Open a support ticket with the link below and tell
+      them what you need." (in the owner's language, everyday words).
   - "needs_backend": the conversation already told the owner this needs data or a rule the store does not have (an
     earlier "needs_backend" or "no_change" answer), and the owner asks again, insists or asks to send it ("I insist", "do it anyway", "Send it to our team", "أرسله إلى فريقكم", "I know you said it needs your team, but..."): then it is
     "refuse" with this kind, not another "needs_backend". Reply: "This needs a change
@@ -143,6 +153,9 @@ ${DASHBOARD_PLACES}
   the code, files or secrets: say kindly that the AI Designer does not share code or files, and offer to change how
   the store looks instead. Never suggest another place or person to get the code from.
 
+"team": true ONLY when the owner cannot do it themselves in a place in the dashboard places list and it needs our
+team to build (every "needs_backend", "refuse" with "needs_backend", and "business_logic" with no place in the list);
+false for every other decision, and for anything a place in the list does ("admin_setting" is always false).
 "large": true when the edit touches several pages or redesigns a whole page; false for a focused tweak.
 "confirm": for "edit" only. false ONLY when the request names exactly one thing in one place and leaves no choice
 open (e.g. "make the header green", "make the add to cart buttons on the product cards rounded"). true for everything
@@ -191,7 +204,7 @@ deeper blue"), never that it is done. Name colours in words ("a deeper blue"); r
 the exact one the owner gave or the picture shows clearly. A colour you choose yourself (e.g. a darker shade of the
 owner's code) is described in words, never as a code.`;
 
-const FALLBACK = { decision: 'unclear', refuseKind: 'none', title: '', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
+const FALLBACK = { decision: 'unclear', refuseKind: 'none', team: false, title: '', large: false, confirm: true, shared: false, task: '', reply: 'Could you say a bit more about what you would like to change?', options: [] };
 
 const promptFor = (text, recent, { pending = null, images = [] } = {}) =>
   `${recent.length ? `Recent conversation:\n${recent.map((m) => `${m.role}: ${m.text}`).join('\n')}\n\n` : ''}${
@@ -249,4 +262,15 @@ export function withoutNewColourCodes(text, ownerTexts = []) {
     .replace(/(\s*[—–-]\s*|,\s*|\s+)?(?:to|something like|like|such as|e\.g\.|around|about)?\s*\(?(#[0-9a-fA-F]{3,8})\b\)?/g, (match, _lead, code) => (given.has(code.toLowerCase()) ? match : ''))
     .replace(/\s+([.,!?])/g, '$1')
     .replace(/[—–-]\s*([.!?])/g, '$1');
+}
+
+/**
+ * Whether the answer gets the link to open a support ticket (the admin's own Support link): only when our team has to
+ * build it. Anything the owner does in a dashboard place gets that place instead.
+ */
+export function needsTeam(decision) {
+  if (decision?.decision === 'needs_backend') return true;
+  if (decision?.decision !== 'refuse') return false;
+  if (decision.refuseKind === 'needs_backend') return true;
+  return decision.refuseKind === 'business_logic' && decision.team === true;
 }

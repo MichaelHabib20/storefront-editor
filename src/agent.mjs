@@ -14,7 +14,7 @@ import { admitsUnchecked, missingLooks } from './looks.mjs';
 import { samplePages } from './sample-pages.mjs';
 import { onlyExtends } from './shared-diff.mjs';
 import { createFilePolicy, relativeTo } from './paths.mjs';
-import { cleanOptions, splitChoices, withoutNewColourCodes } from './triage.mjs';
+import { cleanOptions, needsTeam, splitChoices, withoutNewColourCodes } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
 import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
 import { must, run } from './run.mjs';
@@ -619,7 +619,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
                 files: { images: savedRefs.map((r) => ({ path: path.join(config.dataDir, 'uploads', storeId, chatId, r.file), name: r.file })) },
               })
             : null;
-        chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'refusal', card: { refuseKind, ...(report ? { reportId: report.id } : {}) } });
+        chats.say(storeId, chatId, 'assistant', decision.reply, { runId, kind: 'refusal', card: { refuseKind, ...(report ? { reportId: report.id } : {}) }, ...(needsTeam(decision) ? { support: true } : {}) });
         outcome = 'refuse';
         return;
       } else {
@@ -629,7 +629,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         // a request only our team can build is sent when the owner asks for it (then it is a "refuse" that makes a report)
         const options =
           decision.decision === 'unclear' ? cleanOptions(decision.options) : decision.decision === 'needs_backend' && reports ? [said(text, 'Send it to our team', 'أرسله إلى فريقكم')] : [];
-        chats.say(storeId, chatId, 'assistant', reply, { runId, ...(preview ? { preview: preview.url } : {}), ...(options.length ? { options } : {}) });
+        chats.say(storeId, chatId, 'assistant', reply, { runId, ...(preview ? { preview: preview.url } : {}), ...(options.length ? { options } : {}), ...(needsTeam(decision) ? { support: true } : {}) });
         outcome = decision.decision === 'go_ahead' ? 'unclear' : decision.decision;
         return;
       }

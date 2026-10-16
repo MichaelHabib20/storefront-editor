@@ -74,6 +74,8 @@ function messageOf(m, chatId, reportStatus) {
     options: options(m.options),
     kind,
     ...(card ? { card } : {}),
+    // only our team can do it: the admin shows its own Support (ticket) link under the answer
+    ...(m.support === true ? { support: true } : {}),
     images: (Array.isArray(m.images) ? m.images : []).slice(0, 3).filter((i) => typeof i?.file === 'string').map((i) => ({ id: i.file, url: `chats/${chatId}/images/${i.file}` })),
   };
 }

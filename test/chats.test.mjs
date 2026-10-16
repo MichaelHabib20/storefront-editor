@@ -274,6 +274,53 @@ test('a refusal is a refusal card with its kind; unknown kinds fall back to unsa
   await call('DELETE', `/stores/acme/chats/${a}`);
 });
 
+test('a business rule only our team can build carries the support ticket link; one with a dashboard place does not', async () => {
+  const a = (await call('POST', '/stores/acme/chats', {})).body.id;
+  // a new order workflow: no dashboard place does it
+  triageAnswer = { decision: 'refuse', refuseKind: 'business_logic', team: true, reply: 'This is a business rule, not the look, and changing it needs our team. Open a support ticket with the link below and tell them what you need.' };
+  let last = (await sendAndWait(a, 'i wanna handle a new scenario that make the user make an order without entering an address and then he can update his order to add his address')).messages.at(-1);
+  assert.equal(last.kind, 'refusal');
+  assert.equal(last.support, true);
+  assert.deepEqual(last.card, { refuseKind: 'business_logic' });
+  // the same in Arabic
+  triageAnswer = { decision: 'refuse', refuseKind: 'business_logic', team: true, reply: 'هذه قاعدة عمل وليست شكل المتجر، وتغييرها يحتاج إلى فريقنا. افتح تذكرة دعم من الرابط بالأسفل واكتب ما تحتاجه.' };
+  last = (await sendAndWait(a, 'أريد أن يطلب العميل بدون إدخال العنوان ثم يعدّل طلبه ليضيف عنوانه')).messages.at(-1);
+  assert.equal(last.support, true);
+  assert.match(last.text, /تذكرة دعم/);
+  // something the owner does in a dashboard place: that place, no ticket link (even if the model says "team")
+  triageAnswer = { decision: 'admin_setting', team: true, reply: 'Make it in Dashboard → Discounts → Promotions.' };
+  last = (await sendAndWait(a, 'make a 10% discount on all creams')).messages.at(-1);
+  assert.equal(last.support, undefined);
+  assert.match(last.text, /Dashboard → Discounts → Promotions/);
+  triageAnswer = { decision: 'refuse', refuseKind: 'business_logic', team: false, reply: 'هذه قاعدة عمل وليست الشكل. غيّرها من لوحة التحكم ← الخصومات ← أكواد الخصم.' };
+  last = (await sendAndWait(a, 'اجعل الموقع يطبق كود خصم ١٠٪ تلقائيًا')).messages.at(-1);
+  assert.equal(last.support, undefined);
+  // data or a rule the store does not have: the "Send it to our team" button and the ticket link
+  triageAnswer = { decision: 'needs_backend', reply: 'This needs a change on our side.' };
+  last = (await sendAndWait(a, 'show how many people viewed each product')).messages.at(-1);
+  assert.equal(last.support, true);
+  await call('DELETE', `/stores/acme/chats/${a}`);
+});
+
+test('needsTeam: only work our team has to build gets the ticket link', async () => {
+  const { needsTeam } = await import('../src/triage.mjs');
+  assert.equal(needsTeam({ decision: 'needs_backend' }), true);
+  assert.equal(needsTeam({ decision: 'refuse', refuseKind: 'needs_backend' }), true);
+  assert.equal(needsTeam({ decision: 'refuse', refuseKind: 'business_logic', team: true }), true);
+  assert.equal(needsTeam({ decision: 'refuse', refuseKind: 'business_logic', team: false }), false);
+  assert.equal(needsTeam({ decision: 'refuse', refuseKind: 'unsafe', team: true }), false);
+  assert.equal(needsTeam({ decision: 'admin_setting', team: true }), false);
+  assert.equal(needsTeam({ decision: 'edit', team: true }), false);
+  assert.equal(needsTeam(null), false);
+});
+
+test('the sorting rules send a new workflow to our team and name no dashboard place for it', async () => {
+  const source = (await import('node:fs')).readFileSync(new URL('../src/triage.mjs', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+  assert.match(source, /an order without an address that the shopper completes later/);
+  assert.match(source, /name no dashboard place at all \(not even "Dashboard → Settings"\) and set "team": true/);
+  assert.match(source, /"admin_setting" is always false/);
+});
+
 test('the old single-chat routes still work on chat c_main', async () => {
   triageAnswer = { decision: 'help', reply: 'Old route answer' };
   const sent = await call('POST', '/stores/acme/messages', { text: 'old question' });
