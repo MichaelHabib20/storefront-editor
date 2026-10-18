@@ -12,7 +12,7 @@
     "maxTurns": 40,
     "maxFixRounds": 3
   },
-  "stores": {},
+  "stores": { "seif": { "monthlyLimitUsd": 40 } },
   "files": {
     "editable": ["src/app/**", "src/components/**", "src/lib/messages/**", "src/lib/i18n.ts", "public/**"],
     "locked": ["src/app/api/**", "src/money/**", "src/sdk/**", "**/actions.ts", "**/*.actions.ts", "**/*.server.ts"],
