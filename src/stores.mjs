@@ -5,6 +5,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { sandboxed } from './child-env.mjs';
 import { must, run } from './run.mjs';
 
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -74,7 +75,7 @@ export function createStores(config) {
       const lists = { '{codeFiles}': codeFiles, '{files}': files };
       if (template.some((a) => a in lists && lists[a].length === 0)) continue;
       const args = template.flatMap((a) => (a in lists ? lists[a] : [a]));
-      const result = await run(command, args, { cwd });
+      const result = await run(...sandboxed(config.sandbox, id, command, args), { cwd });
       if (result.code !== 0) return { ok: false, step: `${command} ${template.filter((a) => !(a in lists)).join(' ')}`, output: result.output.slice(-20_000) };
     }
     return { ok: true, step: null, output: '' };

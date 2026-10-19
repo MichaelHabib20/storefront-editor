@@ -18,6 +18,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { deployEnv } from './child-env.mjs';
 import { must, run } from './run.mjs';
 
 export class PublishError extends Error {
@@ -91,13 +92,13 @@ export function createPublisher({ config, stores, chats, isBusy = () => false, l
     const entry = { id: randomUUID(), kind, commit, at: new Date().toISOString(), ok: false, deploymentUrl: null, ...(undoes ? { undoes } : {}) };
     try {
       await exportCommit(commit, siteDir);
-      const result = await run(deployCommand, deployArgs, { cwd: siteDir, timeoutMs: config.deployTimeoutMs });
+      const result = await run(deployCommand, deployArgs, { cwd: siteDir, env: deployEnv(), timeoutMs: config.deployTimeoutMs });
       entry.deploymentUrl = deploymentUrlFrom(result.output, siteUrl);
       entry.ok = result.code === 0;
       if (!entry.ok && entry.deploymentUrl) {
         // the deploy command can lose its connection while the host goes on building: ask the host how it ended
         const [inspectCommand, inspectArgs] = config.inspect ?? ['vercel', ['inspect', '{url}', '--wait']];
-        const inspected = await run(inspectCommand, inspectArgs.map((a) => (a === '{url}' ? entry.deploymentUrl : a)), { cwd: siteDir, timeoutMs: config.deployTimeoutMs });
+        const inspected = await run(inspectCommand, inspectArgs.map((a) => (a === '{url}' ? entry.deploymentUrl : a)), { cwd: siteDir, env: deployEnv(), timeoutMs: config.deployTimeoutMs });
         entry.ok = inspected.code === 0 && /status\s+\S*\s*Ready\b/i.test(inspected.output);
         if (!entry.ok) entry.error = `${result.output.slice(-3000)}\n--- inspect ---\n${inspected.output.slice(-1000)}`;
       } else if (!entry.ok) {

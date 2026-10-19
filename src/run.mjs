@@ -3,18 +3,20 @@
  * check fails); nothing goes through a shell string built from input — arguments are passed as a list.
  */
 import { spawn } from 'node:child_process';
+import { baseEnv } from './child-env.mjs';
 
 /**
  * @param {string} command  e.g. 'git', 'npm'
  * @param {string[]} args
- * @param {{ cwd: string, env?: Record<string, string>, timeoutMs?: number }} options
+ * @param {{ cwd: string, env?: Record<string, string>, timeoutMs?: number }} options  `env` is added to the
+ *   toolchain's share of the editor's environment (src/child-env.mjs); the editor's keys are never passed on
  * @returns {Promise<{ code: number, output: string }>}
  */
 export function run(command, args, { cwd, env = {}, timeoutMs = 15 * 60_000 }) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...baseEnv(), ...env },
       // npm and npx are .cmd files on Windows
       shell: process.platform === 'win32' && command !== 'git',
       windowsHide: true,

@@ -17,6 +17,7 @@ import { createFilePolicy, relativeTo } from './paths.mjs';
 import { cleanOptions, needsTeam, splitChoices, withoutNewColourCodes } from './triage.mjs';
 import { PreviewError } from './preview.mjs';
 import { SCREENSHOT_TOOL, screenshotServer } from './screenshot.mjs';
+import { agentEnv } from './child-env.mjs';
 import { must, run } from './run.mjs';
 import { BudgetError } from './ledger.mjs';
 import fs from 'node:fs';
@@ -166,7 +167,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
         strictMcpConfig: true,
         systemPrompt: systemPrompt(cwd, { eyes: !!eyes, pages: eyes?.pages }),
         ...(chat.sessionId ? { resume: chat.sessionId } : {}),
-        env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
+        env: { ...agentEnv(), CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
         hooks: { PreToolUse: [{ hooks: [fileGuard(cwd, policy)] }] },
       },
     });
@@ -398,7 +399,7 @@ export function createAgentRunner({ config, stores, previews, ledger, aiConfig, 
           strictMcpConfig: true,
           persistSession: false,
           systemPrompt: explainPrompt(),
-          env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
+          env: { ...agentEnv(), CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
           hooks: { PreToolUse: [{ hooks: [fileGuard(cwd, policy)] }] },
         },
       })) {

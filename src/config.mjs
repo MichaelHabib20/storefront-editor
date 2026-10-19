@@ -51,6 +51,17 @@ export function loadConfig(env = process.env) {
      */
     previewPublicUrls: JSON.parse(env.EDITOR_PREVIEW_PUBLIC_URLS ?? '{}'),
     /**
+     * On a server: previews are https://<label>.<this domain>, the label a secret of the store (src/preview.mjs). The
+     * proxy asks GET /preview-route which port a host is and refuses every other host. Takes over from
+     * previewPublicUrls, which has no protection (local use and tunnels only).
+     */
+    previewDomain: env.EDITOR_PREVIEW_DOMAIN?.toLowerCase() || null,
+    /**
+     * Prefix for every command that runs the store's code (checks, build, preview), `{store}` replaced by the store id,
+     * e.g. ["sudo","-n","-u","sf-{store}","--"]. Unset: they run as the editor's own user.
+     */
+    sandbox: JSON.parse(env.EDITOR_SANDBOX ?? 'null'),
+    /**
      * Publishing (src/publish.mjs): the command run in a store's publish folder, which is already linked to its
      * hosting project. The host switches the site over only when its build succeeded.
      */
@@ -62,8 +73,12 @@ export function loadConfig(env = process.env) {
     aiConfigFile: env.EDITOR_AI_CONFIG ?? path.join(root, 'config', 'ai.json'),
     /** The longest one AI turn (an edit or a fix round) may take before it is stopped and refunded. */
     turnTimeoutMs: Number(env.EDITOR_TURN_TIMEOUT_MS ?? 10 * 60_000),
-    /** Shared secret the backend sends as `x-editor-key` (unset: no check, local development only). */
-    serviceKey: env.EDITOR_SERVICE_KEY ?? null,
+    /**
+     * Shared secret the backend sends as `x-editor-key`. The service does not start without it unless
+     * EDITOR_ALLOW_NO_KEY=1 (your own computer only: then nothing is checked).
+     */
+    serviceKey: env.EDITOR_SERVICE_KEY || null,
+    allowNoKey: env.EDITOR_ALLOW_NO_KEY === '1',
     /**
      * The test customer the bug-finding browser signs in with on logged-in pages (never shown to the AI). Unset: the
      * `login` step answers "No test customer is set up".

@@ -22,9 +22,14 @@ Related repos:
 - Node.js 20+, git, and Chromium for Playwright (`npx playwright install --with-deps chromium`).
 - The Vercel CLI (`npm i -g vercel`) for publishing.
 - A process manager (systemd or pm2) so the service restarts by itself.
-- HTTPS on fixed hostnames through a reverse proxy (nginx/Caddy), e.g. `editor.<domain>` → `127.0.0.1:4300` and
-  `preview-<store>.<domain>` → that store's preview port (3301–3399). Turn proxy buffering off for
-  `/stores/:id/events` (server-sent events).
+- HTTPS through a reverse proxy: `editor.<domain>` → `127.0.0.1:4300`, and a wildcard `*.preview.<domain>` whose
+  hosts the proxy routes by asking the editor (`GET /preview-route`, e.g. nginx `auth_request` +
+  `auth_request_set $port $upstream_http_x_preview_port`). Turn proxy buffering off for `/stores/:id/events`
+  (server-sent events).
+- The checks and previews run code the AI wrote. On a server, run them as a separate user per store
+  (`EDITOR_SANDBOX`, e.g. through `sudo` with `SC_API_URL SC_API_KEY PORT` in `env_keep`) that cannot read the
+  editor's files or its environment, and keep that user off the private network and the cloud metadata address
+  with a firewall.
 
 ## Install
 
@@ -45,15 +50,22 @@ npm test            # node --test test/
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | Claude API key (spend is limited per store in `config/ai.json`) |
 | `EDITOR_PORT` | no (4300) | Port of the HTTP API |
-| `EDITOR_SERVICE_KEY` | yes | Shared secret the backend sends as `x-editor-key` (same value as the backend's `STOREFRONT_EDITOR_KEY`) |
+| `EDITOR_SERVICE_KEY` | yes | Shared secret the backend sends as `x-editor-key` (same value as the backend's `STOREFRONT_EDITOR_KEY`). The service does not start without it |
+| `EDITOR_ALLOW_NO_KEY` | no | `1` on your own computer only: start without `EDITOR_SERVICE_KEY` (nothing is checked) |
 | `EDITOR_TEAM_KEY` | for the team reports page | Second key for `/team/...` (backend `STOREFRONT_EDITOR_TEAM_KEY`) |
-| `EDITOR_PREVIEW_PUBLIC_URLS` | yes on a server | Public address per preview port, e.g. `{"3301":"https://preview-seif.<domain>"}` |
+| `EDITOR_PREVIEW_DOMAIN` | yes on a server | e.g. `preview.example.com`: a store's preview is `https://<secret label>.preview.example.com` |
+| `EDITOR_SANDBOX` | yes on a server | Prefix for the commands that run the store's code, e.g. `["sudo","-n","-u","sf-{store}","--"]` |
+| `EDITOR_PREVIEW_PUBLIC_URLS` | no | Local use and tunnels only (no protection): public address per preview port, e.g. `{"3301":"https://x.trycloudflare.com"}` |
 | `EDITOR_TEST_LOGIN_PHONE` / `EDITOR_TEST_LOGIN_PASSWORD` | no | A **test** customer the bug-finding browser signs in with |
 | `SEIF_SC_API_KEY` (one per store, name set in the store record) | if the store's API needs it | The store's storefront API key, passed to its previews |
 | `VERCEL_TOKEN` | for publishing | Lets `vercel deploy` run without an interactive login |
 | `EDITOR_STARTER_REPO`, `EDITOR_WORKSPACES_DIR`, `EDITOR_DATA_DIR` | no | Paths (defaults: `../headless-storefront-demo`, `./workspaces`, `./data`) |
 
 Everything else (checks, preview mode, timeouts, port range) is in `src/config.mjs` with defaults.
+
+Checks, previews and the deploy get only the toolchain's share of this environment (`src/child-env.mjs`) plus what
+they need on purpose: a preview its own store's `SC_API_URL` / `SC_API_KEY`, the deploy `VERCEL_*`, the agent
+`ANTHROPIC_*` / `CLAUDE_*`.
 
 Never commit keys. `data/` (chats, spend ledger, reports, uploads, `stores.json`) and `workspaces/` are git-ignored;
 back up `data/` — it is the service's state.

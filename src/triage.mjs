@@ -6,6 +6,7 @@ import { DASHBOARD_PLACES } from './dashboard-places.mjs';
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
+import { agentEnv } from './child-env.mjs';
 import { contentWithImages, promptWithImages } from './images.mjs';
 
 const Decision = z.object({
@@ -229,6 +230,7 @@ export function createSdkTriage({ query, model }) {
         strictMcpConfig: true,
         persistSession: false,
         outputFormat: { type: 'json_schema', schema: SCHEMA },
+        env: agentEnv(),
       },
     })) {
       if (message.type === 'result') result = message;

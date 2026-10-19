@@ -58,11 +58,14 @@ export function isPublicIp(ip) {
 
 /**
  * @param resolve  host -> [ip] (a test seam; the real one asks DNS for every address)
- * @param ownHosts host names that are the editor's own (preview and tunnel addresses): never readable
+ * @param ownHosts host names that are the editor's own (preview and tunnel addresses): never readable; one that
+ *   starts with "." is a whole domain
  * @param ports    the only ports allowed besides the scheme's own
  */
 export function createFetchGuard({ resolve = async (host) => (await dns.lookup(host, { all: true })).map((a) => a.address), ownHosts = [], ports = [80, 443] } = {}) {
   const own = new Set(ownHosts.map((h) => String(h).toLowerCase()));
+  // ".preview.example.com": that domain and every name under it
+  const ownDomains = [...own].filter((h) => h.startsWith('.'));
 
   /**
    * Throws `UrlRefused` (with a message fit for the owner) unless `value` may be opened.
@@ -81,7 +84,7 @@ export function createFetchGuard({ resolve = async (host) => (await dns.lookup(h
     const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
     if (!ports.includes(port)) throw new UrlRefused(PLAIN);
     const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    if (!host || own.has(host)) throw new UrlRefused(PLAIN);
+    if (!host || own.has(host) || ownDomains.some((d) => host.endsWith(d) || host === d.slice(1))) throw new UrlRefused(PLAIN);
     let addresses;
     if (net.isIP(host)) addresses = [host];
     else {
@@ -103,9 +106,13 @@ export function createFetchGuard({ resolve = async (host) => (await dns.lookup(h
   return { check, inspect };
 }
 
-/** The host names of the editor's own preview and tunnel addresses (EDITOR_PREVIEW_PUBLIC_URLS) and this machine. */
+/**
+ * The host names of the editor's own preview and tunnel addresses (EDITOR_PREVIEW_PUBLIC_URLS) and this machine; the
+ * preview domain (EDITOR_PREVIEW_DOMAIN) as ".<domain>", which covers every name under it.
+ */
 export function ownHostsOf(config) {
   const hosts = new Set(['localhost']);
+  if (config.previewDomain) hosts.add(`.${config.previewDomain.toLowerCase()}`);
   for (const value of Object.values(config.previewPublicUrls ?? {})) {
     try {
       hosts.add(new URL(value).hostname.toLowerCase());

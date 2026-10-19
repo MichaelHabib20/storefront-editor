@@ -9,6 +9,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { BROWSER_TOOLS, browse, browserToolsServer } from './browser-tools.mjs';
 import { promptWithImages, saveShots } from './images.mjs';
 import { diagnosePrompt, diagnoseTask } from './prompt.mjs';
+import { agentEnv } from './child-env.mjs';
 import { must, run } from './run.mjs';
 
 const Step = z.object({
@@ -108,7 +109,7 @@ export function createDiagnoser({ config, stores, previews, chats, reports, brow
           persistSession: false,
           systemPrompt: diagnosePrompt(),
           outputFormat: { type: 'json_schema', schema: SCHEMA },
-          env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
+          env: { ...agentEnv(), CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_AGENT_SDK_CLIENT_APP: 'storefront-editor/0.1' },
           hooks: { PreToolUse: [{ hooks: [guard] }] },
         },
       })) {

@@ -7,6 +7,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { createPreviews, previewLabel } from '../src/preview.mjs';
 import { must } from '../src/run.mjs';
 import { createApp } from '../src/server.mjs';
 import { createStores } from '../src/stores.mjs';
@@ -192,6 +193,117 @@ test('the quick checks get only the changed code files', async () => {
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(workspace, 'args.json'), 'utf8')), ['--files', 'src/a.tsx', 'src/c.ts']);
   await fs.rm(path.join(workspace, 'args.mjs'));
   await fs.rm(path.join(workspace, 'args.json'));
+});
+
+test('checks and previews run without the editor keys, in the sandbox when one is set', async () => {
+  const workspace = app.stores.workspaceOf('acme');
+  process.env.EDITOR_SECRET_PROBE = 'must-not-leak';
+  // the "sandbox" notes the store it was given, then runs the command (and passes a stop on, like sudo)
+  const wrap = path.join(dir, 'wrap.mjs');
+  await fs.writeFile(
+    wrap,
+    "import fs from 'node:fs'; import { spawn } from 'node:child_process'; const [store, cmd, ...args] = process.argv.slice(2); fs.appendFileSync('sandboxed.txt', store + '\\n'); const child = spawn(cmd, args, { stdio: 'inherit' }); process.on('SIGTERM', () => child.kill()); child.on('exit', (code) => process.exit(code ?? 1));\n",
+  );
+  const envProbe = "import fs from 'node:fs'; fs.writeFileSync('env.json', JSON.stringify(process.env));";
+  await fs.writeFile(path.join(workspace, 'envcheck.mjs'), envProbe + '\n');
+  await fs.writeFile(
+    path.join(workspace, 'envserve.mjs'),
+    envProbe + " import http from 'node:http'; http.createServer((q, s) => s.end('ok')).listen(Number(process.argv[2]), '127.0.0.1');\n",
+  );
+  const config = {
+    starterRepo: starter,
+    workspacesDir: path.join(dir, 'workspaces'),
+    dataDir: path.join(dir, 'data'),
+    checks: [['node', ['envcheck.mjs']]],
+    devServe: ['node', ['envserve.mjs', '{port}']],
+    previewPorts: [3461, 3465],
+    sandbox: ['node', wrap, '{store}'],
+  };
+  const stores = createStores(config);
+  const readEnv = async () => JSON.parse(await fs.readFile(path.join(workspace, 'env.json'), 'utf8'));
+
+  assert.equal((await stores.check('acme')).ok, true);
+  let seen = await readEnv();
+  assert.ok(seen.PATH, 'the toolchain still finds node');
+  assert.equal(seen.EDITOR_SECRET_PROBE, undefined);
+  assert.equal(seen.EDITOR_TEST_KEY, undefined, 'a store key only reaches its own previews, as SC_API_KEY');
+
+  const previews = createPreviews(config, stores);
+  try {
+    await previews.start('acme', { production: false });
+    seen = await readEnv();
+    assert.equal(seen.SC_API_URL, 'https://api.acme.test');
+    assert.equal(seen.SC_API_KEY, 'secret-key');
+    assert.equal(seen.EDITOR_SECRET_PROBE, undefined);
+    assert.equal(seen.EDITOR_TEST_KEY, undefined);
+  } finally {
+    await previews.stopAll();
+  }
+  // the check, the preview, and stopping what the preview started
+  assert.deepEqual((await fs.readFile(path.join(workspace, 'sandboxed.txt'), 'utf8')).trim().split('\n'), ['acme', 'acme', 'acme']);
+
+  delete process.env.EDITOR_SECRET_PROBE;
+  for (const file of ['envcheck.mjs', 'envserve.mjs', 'env.json', 'sandboxed.txt']) await fs.rm(path.join(workspace, file));
+});
+
+test('stopping a preview also stops what its command started (npx and a shell do not pass the stop on)', { skip: process.platform === 'win32' }, async () => {
+  const workspace = app.stores.workspaceOf('acme');
+  // like `npx next dev`: the server is a grandchild, and its parent exits without stopping it
+  await fs.writeFile(path.join(workspace, 'npxlike.mjs'), "import { spawn } from 'node:child_process'; spawn('node', ['devserve.mjs', process.argv[2]], { stdio: 'inherit' });\n");
+  const previews = createPreviews({ devServe: ['node', ['npxlike.mjs', '{port}']], previewPorts: [3471, 3475] }, app.stores);
+  const { port } = await previews.start('acme', { production: false });
+  assert.match(await (await fetch(`http://127.0.0.1:${port}/`)).text(), /^dev \d+$/);
+  await previews.stop('acme');
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) }), 'the server is gone, its port free');
+  await fs.rm(path.join(workspace, 'npxlike.mjs'));
+});
+
+test('with a preview domain, a preview is a secret host the proxy can ask about', async () => {
+  const secure = createApp({
+    starterRepo: starter,
+    starterBranch: 'main',
+    workspacesDir: path.join(dir, 'workspaces-secure'),
+    dataDir: path.join(dir, 'data-secure'),
+    checks: [['node', ['check.mjs']]],
+    devServe: ['node', ['devserve.mjs', '{port}']],
+    previewCheckMs: 1500,
+    previewPorts: [3466, 3470],
+    serviceKey: 'service-key',
+    previewDomain: 'preview.example.test',
+  });
+  await new Promise((resolve) => secure.server.listen(0, '127.0.0.1', resolve));
+  const at = `http://127.0.0.1:${secure.server.address().port}`;
+  const key = { 'x-editor-key': 'service-key' };
+  const route = (host) => fetch(`${at}/preview-route`, { headers: host ? { 'x-preview-host': host } : {} });
+  try {
+    assert.equal((await fetch(`${at}/stores`)).status, 401, 'the API still needs the key');
+    const created = await fetch(`${at}/stores`, { method: 'POST', headers: { ...key, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'beta', apiUrl: 'https://api.beta.test' }) });
+    assert.equal(created.status, 201);
+
+    const label = previewLabel('service-key', 'beta');
+    assert.match(label, /^[0-9a-f]{32}$/);
+    assert.equal((await route(`${label}.preview.example.test`)).status, 403, 'no preview running: no port');
+
+    const started = await secure.previews.start('beta', { production: false });
+    assert.equal(started.url, `https://${label}.preview.example.test`);
+    assert.equal(secure.previews.list()[0].url, started.url);
+
+    for (const host of [`${label}.preview.example.test`, `${label.toUpperCase()}.Preview.Example.Test:443`]) {
+      const answer = await route(host);
+      assert.equal(answer.status, 204, host);
+      assert.equal(answer.headers.get('x-preview-port'), String(started.port));
+    }
+    const other = previewLabel('service-key', 'acme');
+    for (const host of [`${other}.preview.example.test`, `${label}.preview.example.test.evil.test`, `${label}.evil.test`, `x.${label}.preview.example.test`, 'preview.example.test', null]) {
+      const answer = await route(host);
+      assert.equal(answer.status, 403, String(host));
+      assert.equal(answer.headers.get('x-preview-port'), null);
+    }
+    assert.notEqual(previewLabel('another-key', 'beta'), label, 'a new service key moves every preview address');
+  } finally {
+    await secure.previews.stopAll();
+    await new Promise((resolve) => secure.server.close(resolve));
+  }
 });
 
 test('store copies must be on the starter drive', () => {

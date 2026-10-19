@@ -30,6 +30,7 @@
  *   GET    /previews
  *   POST   /stores/:id/preview         build and serve the copy
  *   DELETE /stores/:id/preview
+ *   GET    /preview-route              (the preview proxy; no key) x-preview-host -> 204 x-preview-port, or 403
  */
 import http from 'node:http';
 import path from 'node:path';
@@ -378,6 +379,13 @@ export function createApp(config = loadConfig(), deps = {}) {
     const pathname = new URL(req.url, 'http://local').pathname;
     const events = req.method === 'GET' && pathname.match(/^\/stores\/([^/]+)\/events$/);
     if (events) return stream(req, res, decodeURIComponent(events[1]));
+    // the preview proxy's question (nginx auth_request): which port is this preview host? Only a running preview's
+    // secret host gets one, so it needs no key; 403 is the answer auth_request passes on as it is
+    if (req.method === 'GET' && pathname === '/preview-route') {
+      const port = previews.route(req.headers['x-preview-host']);
+      res.writeHead(port ? 204 : 403, port ? { 'x-preview-port': String(port) } : {});
+      return res.end();
+    }
     if (config.serviceKey && !keyMatches(req.headers['x-editor-key'], config.serviceKey)) return send(401, { error: 'unauthorized', message: 'Missing or wrong x-editor-key.' });
     try {
       if (pathname.startsWith('/team/')) {
@@ -402,8 +410,23 @@ export function createApp(config = loadConfig(), deps = {}) {
   return { server, stores, previews, aiConfig, ledger, chats, runner, publisher, browsers, reports, diagnoser, siteReader };
 }
 
+/** Why the service must not start with this configuration, or null. */
+export function startProblem(config) {
+  if (!config.serviceKey && !config.allowNoKey) {
+    return 'EDITOR_SERVICE_KEY is not set: anyone who reaches the service could use it. Set it (the backend\'s STOREFRONT_EDITOR_KEY), or EDITOR_ALLOW_NO_KEY=1 on your own computer.';
+  }
+  if (config.previewDomain && !config.serviceKey) return 'EDITOR_PREVIEW_DOMAIN needs EDITOR_SERVICE_KEY: the preview addresses are signed with it.';
+  return null;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const config = loadConfig();
+  const problem = startProblem(config);
+  if (problem) {
+    console.error(problem);
+    process.exit(1);
+  }
+  if (!config.serviceKey) console.warn('No EDITOR_SERVICE_KEY (EDITOR_ALLOW_NO_KEY=1): every request is accepted. Your own computer only.');
   const { server, previews, browsers, siteReader } = createApp(config);
   server.listen(config.port, '127.0.0.1', () => console.log(`storefront-editor on http://127.0.0.1:${config.port}`));
   const shutdown = async () => {
